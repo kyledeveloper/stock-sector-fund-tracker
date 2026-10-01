@@ -32,13 +32,14 @@ def test_splitter_respects_quotes_and_comments():
 def test_apply_real_migrations_twice_is_idempotent():
     engine = _memory_engine()
     first = apply_migrations(engine)
-    assert first == 3  # 001_init.sql + 002_sector_momentum.sql + 003_drop_m1.sql
+    assert first == 4  # 001 + 002 + 003_drop_m1 + 004_m2_exposure
 
     tables = set(inspect(engine).get_table_names())
     assert "sector_flow" not in tables, "M1 cut: sector_flow must be gone"
+    assert "implied_exposure" not in tables, "M2 redefined: implied_exposure replaced"
     for expected in (
         "holding",
-        "implied_exposure",
+        "stock_exposure",
         "price_bar",
         "sector_momentum",
         "put_call_ratio",

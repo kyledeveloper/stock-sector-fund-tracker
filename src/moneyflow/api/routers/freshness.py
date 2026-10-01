@@ -5,23 +5,26 @@ GET /api/v1/freshness and renders "as of [ET]" or a stale gray-out from it.
 The backend MUST keep serving this shape; the frontend MUST NOT invent
 freshness state locally.
 
-Phase 0 stub: no module has real data yet, so all four report stale.
-Phase 1 replaces the body with a read of the freshness table.
+Phase 1: reads the freshness table; staleness follows the T+1 rule.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 
+from moneyflow.common.trading_day import today_et
 from moneyflow.models import Freshness
+from moneyflow.services.engine import get_engine
+from moneyflow.services.freshness import get_freshness
 
 router = APIRouter()
 
-# v1 modules: M1 cut per user decision 2026-10-01 (option D).
-MODULES = ("m2", "m3", "m4", "m5")
+
+def _engine():
+    return get_engine()  # monkeypatched in tests
 
 
 @router.get("/freshness", response_model=list[Freshness])
 def freshness() -> list[Freshness]:
-    """Per-module freshness. Stub: everything stale until Phase 1."""
-    return [Freshness(module=m, as_of=None, stale=True) for m in MODULES]
+    """Per-module freshness from the watchdog table."""
+    return get_freshness(_engine(), today_et())

@@ -40,8 +40,16 @@ export interface FilingEvent {
   lag_note: string;
 }
 
+export interface StockExposure {
+  as_of: string; // YYYY-MM-DD (ET)
+  ticker: string;
+  total_weight: number; // sum of weights across sector ETFs, -0.01..~1 (small negative = futures hedge leg)
+  etf_count: number;
+  contributing_etfs: string[];
+}
+
 export interface Freshness {
-  module: "m1" | "m2" | "m3" | "m4" | "m5";
+  module: "m2" | "m3" | "m4" | "m5"; // M1 cut from v1 (user D, 2026-10-01)
   as_of: string | null;
   checked_at: string;
   stale: boolean;

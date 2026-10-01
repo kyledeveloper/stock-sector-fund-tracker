@@ -28,7 +28,11 @@ BENCHMARK = "SPY"
 
 
 class SectorFlow(BaseModel):
-    """One sector ETF's net creation/redemption flow for a day (USD)."""
+    """One sector ETF's net creation/redemption flow for a day (USD).
+
+    v2 concept: M1 was cut from v1 (user decision 2026-10-01), so nothing
+    produces this model yet. Kept as the contract for a future flow source.
+    """
 
     as_of: date
     ticker: str
@@ -50,7 +54,10 @@ class Holding(BaseModel):
     etf_ticker: str
     ticker: str
     name: str = ""
-    weight: float = Field(ge=0, le=1)
+    # Real SSGA files carry small negative weights for short futures hedges
+    # (e.g. XLF "XAF FINANCIAL DEC26" at -0.01% on 2026-10-01). Allow down to
+    # -1%; anything beyond is a data error and fails loudly.
+    weight: float = Field(ge=-0.01, le=1)
 
 
 class ImpliedExposure(BaseModel):
@@ -59,6 +66,9 @@ class ImpliedExposure(BaseModel):
     Derived as sum over sector ETFs of (sector net flow * constituent weight).
     In-kind creations involve no market buying of constituents; this number
     mixes mechanical flows and must never be labeled 主力/聪明钱.
+
+    v2 concept: M1 was cut from v1 (user decision 2026-10-01), so nothing
+    produces this model yet. v1 uses StockExposure (holdings snapshot) instead.
     """
 
     as_of: date
@@ -66,6 +76,24 @@ class ImpliedExposure(BaseModel):
     implied_usd: float
     contributing_etfs: list[str] = Field(default_factory=list)
     consecutive_days: int = 1
+
+
+class StockExposure(BaseModel):
+    """Per-stock cross-sector weight snapshot (M2, v1). NOT a fund flow.
+
+    total_weight = sum of the stock's weights across the 11 sector ETFs
+    (a stock can sit in several, e.g. GOOGL in XLC and XLY).
+    A holdings snapshot only: day-over-day weight changes are mostly price
+    moves, never fund flows. Panel copy must say so.
+    """
+
+    as_of: date
+    ticker: str
+    # May be slightly negative: a ticker held only as a short futures hedge
+    # (e.g. IXAZ6 at -0.01% in XLF) sums to a negative total. Same bound as Holding.
+    total_weight: float = Field(ge=-0.01, description="sum of weights, ~0..1")
+    etf_count: int = Field(ge=1, default=1)
+    contributing_etfs: list[str] = Field(default_factory=list)
 
 
 class PriceBar(BaseModel):
@@ -114,7 +142,7 @@ class Freshness(BaseModel):
     string over the API, which is what web/src/api/types.ts mirrors.
     """
 
-    module: str  # "m1".."m5"
+    module: str  # "m2".."m5" (M1 cut from v1)
     as_of: date | None
     checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     stale: bool = False

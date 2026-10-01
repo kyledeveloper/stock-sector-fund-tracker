@@ -5,6 +5,10 @@ interface Props {
   title: string;
   module: Freshness["module"];
   freshness: Freshness | null;
+  /** True when the panel rendered data rows. If freshness lookup failed
+   *  (null) while data exists, the unknown state must read as stale --
+   *  never as fresh (red-team M2). */
+  hasData?: boolean;
   children: ReactNode;
 }
 
@@ -13,8 +17,9 @@ interface Props {
  * every panel shows "as of [ET date]"; stale panels render grayed out
  * with a warning instead of silently showing old data.
  */
-export function Panel({ title, freshness, children }: Props) {
-  const stale = freshness?.stale ?? false;
+export function Panel({ title, freshness, hasData = false, children }: Props) {
+  const freshnessUnknown = freshness === null && hasData;
+  const stale = freshness?.stale ?? freshnessUnknown;
   return (
     <section
       style={{
@@ -34,7 +39,11 @@ export function Panel({ title, freshness, children }: Props) {
       >
         <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
         <span style={{ fontSize: 12, color: "#666" }}>
-          {freshness?.as_of ? `as of ${freshness.as_of} ET` : "no data yet"}
+          {freshness?.as_of
+            ? `as of ${freshness.as_of} ET`
+            : freshnessUnknown
+              ? "freshness unknown"
+              : "no data yet"}
           {stale && " · STALE"}
         </span>
       </header>
