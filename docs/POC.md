@@ -8,7 +8,9 @@
 | # | 数据源 | 模块 | 结论 | 备注 |
 |---|--------|------|------|------|
 | 1 | ETF.com 免费页 | M1 | ⛔ NO-GO（主源证伪） | 免费页仅全市场 Top 10 申购/赎回榜，无 11 只板块 ETF 逐日流 |
-| 1b | ETF.com 个股页 fund-flow 接口 | M1 | ⏳ 待定 | 已派浏览器任务抓 XHR 接口；若找到则 GO |
+| 1b | ETF.com 个股页 fund-flow 接口 | M1 | ⛔ NO-GO | 个股 Fund Flows tab 需登录才渲染数据，无公开 XHR（浏览器实测 2026-10-01） |
+| 1c | ETFdb 免费页 | M1 | ⚠️ 仅汇总口径 | 仅 5日/1月/3月…净流入汇总（如 XLK 5日 +313.85M），无逐日序列 |
+| 1d | stockanalysis 免费页 | M1 | ⛔ NO-GO | `/etf/xlk/` 静态 HTML 无 fund-flow 数据 |
 | 2 | SSGA 官方每日持仓 XLSX | M2 | ✅ GO | 200 + 可解析，T-1 口径已确认 |
 | 3 | Yahoo chart API（EOD） | M3 | ✅ GO | 64 根日 K（含当日），无 key；Tiingo 为备选（需免费注册 token） |
 | 4 | CBOE 每日 put/call | M5 | ✅ GO | 服务端渲染 HTML，`?dt=` 切日期，无需登录 |
@@ -16,11 +18,22 @@
 
 ## 逐项记录
 
-### 1. ETF.com（M1）— NO-GO
+### 1. ETF.com（M1）— NO-GO（$0 路线已穷尽）
 - `https://www.etf.com/robots.txt`：`User-agent: *` 下无 blanket Disallow（`#Disallow: /` 被注释），抓取不违反 robots。
 - 但免费每日页面只发布全市场 Top 10 creations + Top 10 redemptions（红队 2026-10-01 已实测多日页面结构）。
 - 后果：XLU/XLRE/XLC 等多数日子不上榜 → 静默数据缺口。**禁止**拿 Top-10 当全量用。
-- 待定：个股页（如 `/xlk`）的 fund-flow 历史走哪个 XHR 接口。浏览器任务进行中。
+- 个股页（如 `/xlk`）的 Fund Flows tab 需登录才渲染数据（浏览器实测 2026-10-01，3 次点击均弹登录框），
+  无公开 XHR 可抓 → $0 无认证路线证伪。
+- ETFdb 免费页（`etfdb.com/etf/XLK/`）仅提供 5日/1月/3月…净流入**汇总**（如 5日 +313.85M），无逐日序列。
+- stockanalysis 免费页（`/etf/xlk/`）静态 HTML 无 fund-flow 数据。
+
+**M1 结论：$0 无认证条件下，不存在 11 只板块 ETF 的逐日资金流数据源 → M1 按原设计 NO-GO。**
+备选（需用户决策）：
+- A. M1 面板改用 ETFdb **近5日净流入**（每日更新、5日窗口），诚实标注口径；用其日变化做伪动量。
+- B. 从份额变化推导日流（需每日 shares outstanding 源，暂未找到 $0 可靠源）。
+- C. 付费数据（违背 $0 约束）。
+- D. v1 砍掉 M1，用 M2（持仓敞口）+ M3（动量）讲板块轮动故事。
+推荐 A（保留产品 headline 数字，口径诚实），但决定权在用户。
 
 ### 2. SSGA 持仓（M2）— GO
 - `https://www.ssga.com/library-content/products/fund-data/etfs/us/holdings-daily-us-en-xlk.xlsx`
@@ -49,5 +62,6 @@
 
 ## 待办（阻塞 Phase 1 开工）
 - [x] 浏览器任务返回：CBOE put/call 真实地址 → GO（服务端渲染 HTML + `?dt=`）
-- [ ] 浏览器任务返回：ETF.com 个股 fund-flow XHR 接口 → 决定 M1 最终源
+- [x] M1 数据源穷尽验证 → NO-GO（$0），备选 A–D 待用户决策
+- [ ] 红队审查 Phase 0
 - [ ] 用户 VPS 部署后：复验 EDGAR 可达性
