@@ -1,0 +1,9 @@
+[Unit]
+Description=Run US Money Flow pipeline daily after US close (PDT)
+
+[Timer]
+OnCalendar=America/Los_Angeles *-*-* 15:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

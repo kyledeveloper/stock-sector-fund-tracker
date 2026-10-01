@@ -1,0 +1,10 @@
+[Unit]
+Description=US Money Flow Tracker - daily pipeline
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/hatch/workspace/us-moneyflow
+Environment=PYTHONPATH=/home/hatch/workspace/us-moneyflow/src
+ExecStart=/home/hatch/workspace/us-moneyflow/.venv/bin/python -m moneyflow.pipeline.daily run-all
