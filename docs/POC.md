@@ -16,7 +16,7 @@
 | 2 | SSGA 官方每日持仓 XLSX | M2 | ✅ GO | 200 + 可解析，T-1 口径已确认 |
 | 3 | Yahoo chart API（EOD） | M3 | ✅ GO | 64 根日 K（含当日），无 key；Tiingo 为备选（需免费注册 token） |
 | 4 | CBOE 每日 put/call | M5 | ✅ GO | 服务端渲染 HTML，`?dt=` 切日期，无需登录 |
-| 5 | SEC EDGAR | M4 | ⚠️ 条件 GO | 本机 egress IP 被 SEC 拦截（403）；代码层合规已就绪，部署 VPS 上需复验 |
+| 5 | SEC EDGAR | M4 | ✅ GO | 第二出口实测 200（本机 IP 被拦是出口问题）；VPS 部署后复验 |
 
 ## 逐项记录
 
@@ -58,14 +58,16 @@
 - 无公开 JSON XHR（Next.js 服务端渲染 + RSC），采集方式 = **解析服务端渲染 HTML 表格**，无需登录、无反爬迹象。
 - 口径：TOTAL / INDEX / EQUITY / VIX / ETP 五个比率（页面文本抓取已验证数值）。
 
-### 5. EDGAR（M4）— 条件 GO
-- `curl -A "us-moneyflow/0.1 (+...)" https://data.sec.gov/submissions/CIK0001067983.json` → UA 发送正确，但返回 403（SEC 按 egress IP 拦截自动化工具；`www.sec.gov` 同样 403）。
-- 代码层已合规：`common/http.py` 强制描述性 UA、可配置限流（默认 0.5s 间隔，远低于 SEC 10 req/s 上限）。
-- **部署到用户 VPS 后必须复验**（Phase 4 DoD 的一部分）；若 VPS IP 同样被拦，备选：SEC 公司概念 API 同源、或延迟到 Phase 5 用浏览器任务中转。
+### 5. EDGAR（M4）— GO
+- 本机 curl（`us-moneyflow/0.1` 描述性 UA）→ 403（SEC 按本机 egress IP 拦截自动化工具）。
+- **第二出口实测（2026-10-01，浏览器）：`data.sec.gov/submissions/CIK0001067983.json` → HTTP 200，
+  返回 Berkshire Hathaway（CIK 1067983）的标准 submissions JSON（cik/entityType/filings 字段齐全），无 403。
+  → 403 是本机出口 IP 问题，不是源不可用。
+- 代码层合规：`common/http.py` 强制描述性 UA、可配置限流（默认 0.5s 间隔，远低于 SEC 10 req/s 上限）。
+- VPS 部署后复验一次即可（Phase 4 DoD）。
 
 ## 待办（阻塞 Phase 1 开工）
 - [x] 浏览器任务返回：CBOE put/call 真实地址 → GO（服务端渲染 HTML + `?dt=`）
 - [x] M1 数据源穷尽验证 → NO-GO（$0 逐日）；收敛为 A（ETFdb 近5日净流入）vs D（砍 M1），**待用户决策**
 - [x] 红队审查 Phase 0 → CONDITIONAL，3 blocker 已修（REDTEAM.md）
-- [ ] EDGAR 第二出口实测结果（已派，结果待送达；不阻塞 Phase 0 验收）
-- [ ] 用户 VPS 部署后：复验 EDGAR 可达性
+- [x] EDGAR 第二出口实测 → **200 正常**（403 是本机 IP 问题）；VPS 部署后复验（Phase 4 DoD）

@@ -26,8 +26,9 @@ M1 数据源走 A/B/C/D/E/F 评估后收敛为 **A（ETFdb 近5日净流入）vs
 - **M3** 真实 payload 零存档 → Phase 1 第一个 parser 契约测试起，SSGA XLSX / CBOE HTML / Yahoo JSON 存 `tests/fixtures/` 做 golden fixture。
 - **M4** 周末/节假日行为 → PLAN 已加入"非交易日跳过写入"规则；Phase 1 实现 `trading_day` helper。
 - **M5** Yahoo 当日未收盘 bar → PLAN 已记：EOD adapter 必须丢弃未完成 bar（Phase 3）。
-- **M6** EDGAR "VPS 复验"往后推风险 → 已派第二出口（浏览器）实测 `data.sec.gov/submissions/CIK0001067983.json`，
-  结果待送达；若同样被拦，M4 在 Phase 4 开工前裁决去留，不拖到 Phase 4 当天。
+- **M6** EDGAR "VPS 复验"往后推风险 → 已关闭：第二出口（浏览器）实测
+  `data.sec.gov/submissions/CIK0001067983.json` 返回 **HTTP 200**（Berkshire Hathaway 标准 submissions JSON），
+  证实 403 是本机 egress IP 问题而非源不可用。VPS 部署后复验一次即可（Phase 4 DoD）。
 - **M7** PLAN 与 ALLOWED 表矛盾 → 已收紧为 PLAN 口径：`compute` 仅依赖 `models`（`ingest` 保留 `common` 给共享 HTTP 客户端，测试与 PLAN 已对齐）。
 
 ## 🟡 Minor（状态）
