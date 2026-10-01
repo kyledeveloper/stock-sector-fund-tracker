@@ -68,6 +68,7 @@
 
 ## 待办（阻塞 Phase 1 开工）
 - [x] 浏览器任务返回：CBOE put/call 真实地址 → GO（服务端渲染 HTML + `?dt=`）
-- [x] M1 数据源穷尽验证 → NO-GO（$0 逐日）；收敛为 A（ETFdb 近5日净流入）vs D（砍 M1），**待用户决策**
+- [x] M1 数据源穷尽验证 → NO-GO（$0 逐日）；**用户决策 D（2026-10-01）：v1 砍掉 M1**；
+  M2 重定义为持仓敞口快照，阶段重排为 4 个（PLAN.md）
 - [x] 红队审查 Phase 0 → CONDITIONAL，3 blocker 已修（REDTEAM.md）
 - [x] EDGAR 第二出口实测 → **200 正常**（403 是本机 IP 问题）；VPS 部署后复验（Phase 4 DoD）

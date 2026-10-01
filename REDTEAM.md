@@ -4,8 +4,9 @@
 
 ## 总 verdict：CONDITIONAL → 修复后 GO（附 M1 待用户决策）
 
-三处 blocker 已在 Phase 0 内修复并回归测试通过；major 已排入 Phase 1 计划；
-M1 数据源走 A/B/C/D/E/F 评估后收敛为 **A（ETFdb 近5日净流入）vs D（砍 M1）**，待用户拍板。
+三处 blocker 已在 Phase 0 内修复并回归测试通过；major 已排入 Phase 1–4 计划；
+M1 数据源经 A/B/C/D/E/F 评估后，**用户决策 D（2026-10-01）：v1 砍掉 M1**；
+M2 重定义为持仓敞口快照，阶段重排为 4 个。
 
 ---
 
@@ -21,14 +22,14 @@ M1 数据源走 A/B/C/D/E/F 评估后收敛为 **A（ETFdb 近5日净流入）vs
 
 ## 🟠 Major（Phase 1 计划内排期）
 
-- **M1** CBOE robots/ToS 未验证 → Phase 1 开工前补查 `cboe.com/robots.txt` + 条款并记录；Phase 5 加 HTML fixture parser 契约测试。
-- **M2** ETFdb 5日汇总只采过一次快照 → Phase 1 开工前连采两天验证数字会动 + 读 ToS；robots 已查：`/etf/` 未被 Disallow，但 `Crawl-delay: 3` 必须遵守。
+- **M5** CBOE robots/ToS 未验证 → Phase 4 开工前补查 `cboe.com/robots.txt` + 条款并记录；
+  Phase 4 加 HTML fixture parser 契约测试。
+- **M2** ~~ETFdb 5日汇总只采过一次快照~~ → n/a（M1 已砍，ETFdb 路线作废）。
 - **M3** 真实 payload 零存档 → Phase 1 第一个 parser 契约测试起，SSGA XLSX / CBOE HTML / Yahoo JSON 存 `tests/fixtures/` 做 golden fixture。
 - **M4** 周末/节假日行为 → PLAN 已加入"非交易日跳过写入"规则；Phase 1 实现 `trading_day` helper。
-- **M5** Yahoo 当日未收盘 bar → PLAN 已记：EOD adapter 必须丢弃未完成 bar（Phase 3）。
-- **M6** EDGAR "VPS 复验"往后推风险 → 已关闭：第二出口（浏览器）实测
-  `data.sec.gov/submissions/CIK0001067983.json` 返回 **HTTP 200**（Berkshire Hathaway 标准 submissions JSON），
-  证实 403 是本机 egress IP 问题而非源不可用。VPS 部署后复验一次即可（Phase 4 DoD）。
+- **M5** Yahoo 当日未收盘 bar → PLAN 已记：EOD adapter 必须丢弃未完成 bar（Phase 2）。
+- **M6** EDGAR → 已关闭：第二出口实测 **HTTP 200**，证实 403 是本机 egress IP 问题。
+  VPS 部署后复验一次即可（Phase 3 DoD）。
 - **M7** PLAN 与 ALLOWED 表矛盾 → 已收紧为 PLAN 口径：`compute` 仅依赖 `models`（`ingest` 保留 `common` 给共享 HTTP 客户端，测试与 PLAN 已对齐）。
 
 ## 🟡 Minor（状态）
@@ -54,4 +55,5 @@ M1 数据源走 A/B/C/D/E/F 评估后收敛为 **A（ETFdb 近5日净流入）vs
 | B（份额推导） | 源不存在，不可 commit |
 | C（付费） | 违反 $0 约束，死选项 |
 
-**收敛为二选一（用户决策）：A. M1 用 ETFdb 近5日净流入（诚实标注口径）/ D. v1 砍掉 M1。推荐 A。**
+**用户决策（2026-10-01）：D。v1 砍掉 M1。** M2 重定义为持仓敞口快照（原"持仓×板块流"
+公式失效），阶段重排为 Phase 1–4。`sector_flow` 表由 `003_drop_m1.sql` 移除。
