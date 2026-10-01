@@ -110,3 +110,47 @@ M2 重定义为持仓敞口快照，阶段重排为 4 个。
 - Phase 0 M5（CBOE robots/ToS）→ Phase 4 开工前补查。
 - Phase 0 M6（EDGAR 403 系本机 egress IP）→ VPS 部署后复验。
 - Phase 2 开工前用户需决策：Yahoo chart（非官方）做 EOD 主源 vs 恢复 Tiingo。
+
+---
+
+# REDTEAM — Phase 2 独立审查（2026-10-01）
+
+审查人：独立红队子代理（未参与实现）→ 蓝队修复 → 复验通过 → 本文件为最终记录。
+
+EOD 数据源：用户决策（2026-10-01）**先用 Yahoo**（chart API，adj close 优先；Tiingo 免费档为 fallback）。
+
+## 总 verdict：CONDITIONAL → 修复后 GO
+
+2 个 blocker 均为静默数据损坏类（与 Phase 1 同一标准），已修复并加回归测试；
+5 个 minor 中 4 个已修复（minor-2 为一行变更）、1 个接受为已知限制（minor-3）。
+
+## 🔴 Blocker（已修复）
+
+| # | 问题 | 修复 | 验证 |
+|---|------|------|------|
+| B1 | `ingest/eod.py`：`adjclose` 数组短于 `timestamp` 时静默回退到未复权收盘，同一序列混用两种价格，20/60d 超额收益被写坏且无报错 | `parse` 内 fail-loud：`adjclose` 存在但长度 ≠ timestamps 长度 → `ValueError`（上游 schema 漂移） | `test_short_adjclose_raises_loudly`：fixture 截断 5 个 adjclose → 抛错；`test_prefers_adjusted_close` 仍过（正常路径不受影响） |
+| B2 | `ingest/eod.py` + `compute/momentum.py`：payload 含重复时间戳时 adapter 返回 65 根 bar（64 个日期），下游 `{date: close}` 字典静默 last-wins，动量被写坏 | `parse` 内 fail-loud：`len(set(timestamps)) != len(timestamps)` → `ValueError` | `test_duplicate_timestamps_raise_loudly`：fixture 追加重复时间戳 → 抛错；`run_m3` 端到端不再可达此路径 |
+
+## 🟡 Minor（已修复 4 / 接受 1）
+
+| # | 问题 | 处理 |
+|---|------|------|
+| m1 | `YahooEodAdapter(now=naive_dt)` 在非 ET 系统上静默击穿未收盘 bar 门禁（timestamp() 按系统时区解读） | `__init__` 拒绝 naive datetime，非 ET aware 统一 `astimezone(ET)`；`test_naive_now_rejected` |
+| m2 | 日常 `m3` 用 `range=3mo`（~64 bars），跨年假窗口可跌破 61-bar 门限导致 pipeline 持续 fail-loud | 日常默认改为 `range=6mo`（仍 12 个请求）；`backfill-m3` 同值 |
+| m3 | `run_m3` 内三处独立 commit（bars → momentum → freshness），崩溃窗口留下 bars-without-momentum | **接受为已知限制**：freshness 未标记 → 面板诚实 STALE，重试经幂等 upsert 自愈；与 Phase 1 `run_m2` 同模式，不在 v1 改 |
+| m4 | `_validate_batch` 对空 bars 列表抛 `max() arg is an empty sequence`，不指名 ticker | 先检查空列表，`ValueError(f"M3: {ticker} returned no bars ...")` |
+| m5 | `run_m3(as_of=...)` 调用方覆盖可使 freshness 与 momentum 行 as_of 脱钩 | 删除该参数，`as_of` 恒由校验后的 batch 派生（三处调用点已确认无人传参） |
+
+## ✅ 红队验证通过项（抽样证据）
+
+- B1 一致性门：混合 latest bar 日期 → 写前 `ValueError`（含 16:00 ET 抓取跨时段场景）。
+- 单 ticker 404 → `PoliteClient` 对 4xx 快速抛错，零写入（all-or-nothing）。
+- 未收盘 bar 门禁：盘中丢弃 / 收盘后保留 / Yahoo 自带 `regular.end` 覆盖提前收市日 / 周末运行，均正确；bar 时间戳为 09:30 ET，按 ET 日期转换 DST 安全。
+- 计算层按 benchmark 日期对齐，ticker 缺日期 → fail-loud，无静默窗口漂移。
+- `GET /api/v1/momentum`：M3 未运行返回 `[]`；前端空态诚实；`Panel` fail-closed（freshness 未知 → STALE 灰化）。
+- 文案诚实："价格动量信号，非资金流"，无资金流/主力/聪明钱表述；ECharts tooltip 延续 Phase 1 的 `escapeHtml`。
+- 架构测试通过；新增文件 15–165 行，均在 ~300 行预算内；无分层违规。
+- 回填链路：新库 `backfill-m3`（6mo≈126 bars）→ 日常 `m3`；或日常先行（64 ≥ 61），无缺口。
+- 真实数据冒烟（2026-10-01）：12 ticker × 126 bars → 1512 bars 入库，11 板块动量（XLK 领涨 +7.77%/+6.43%，XLE 走弱），幂等重跑 OK。
+
+最终：68 tests passed，ruff check + format clean，React 构建通过（ECharts chunk > 500kB 告警延续 Phase 1，defer）。

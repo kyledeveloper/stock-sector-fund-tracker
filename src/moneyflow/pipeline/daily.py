@@ -10,6 +10,7 @@ import typer
 
 from moneyflow.common.trading_day import is_trading_day, today_et
 from moneyflow.services import m2 as m2_service
+from moneyflow.services import m3 as m3_service
 from moneyflow.services.freshness import MODULES
 from moneyflow.store.db import SessionLocal, get_engine
 from moneyflow.store.migrate import apply_migrations
@@ -40,7 +41,8 @@ def run_all(engine=None) -> dict:
             session.close()
         return {"skipped": True, "today": today}
     m2_result = m2_service.run_m2(engine)
-    return {"skipped": False, "today": today, "m2": m2_result}
+    m3_result = m3_service.run_m3(engine)
+    return {"skipped": False, "today": today, "m2": m2_result, "m3": m3_result}
 
 
 @app.command()
@@ -59,7 +61,30 @@ def m2() -> None:
 
 @app.command()
 def m3() -> None:
-    raise NotImplementedError("Phase 2: sector momentum (not built yet)")
+    """M3: Yahoo EOD -> sector momentum vs SPY (simplified RRG)."""
+    today = today_et()
+    if not is_trading_day(today):
+        typer.echo(f"{today}: not a trading day, m3 skipped (same gate as run-all).")
+        return
+    result = m3_service.run_m3(_engine())
+    typer.echo(
+        f"m3 done: {result['sectors']} sectors, "
+        f"{result['bars']} bars stored as of {result['as_of']}"
+    )
+
+
+@app.command(name="backfill-m3")
+def backfill_m3() -> None:
+    """M3 backfill: fetch ~6 months of EOD for the 12 M3 tickers.
+
+    One-off before the first daily run (60 trading days of history are
+    required for the 60d window). Idempotent by upsert; safe to re-run.
+    """
+    result = m3_service.run_m3(_engine(), range="6mo")
+    typer.echo(
+        f"m3 backfill done: {result['sectors']} sectors, "
+        f"{result['bars']} bars stored as of {result['as_of']}"
+    )
 
 
 @app.command()
@@ -78,7 +103,10 @@ def run_all_cmd() -> None:
     if result["skipped"]:
         typer.echo(f"{result['today']}: not a trading day, writes skipped.")
     else:
-        typer.echo(f"{result['today']}: m2 ok ({result['m2']['exposures']} exposures).")
+        typer.echo(
+            f"{result['today']}: m2 ok ({result['m2']['exposures']} exposures), "
+            f"m3 ok ({result['m3']['sectors']} sectors)."
+        )
 
 
 if __name__ == "__main__":

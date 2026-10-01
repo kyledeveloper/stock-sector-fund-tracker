@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Panel } from "./components/Panel";
 import { ExposurePanel } from "./components/ExposurePanel";
+import { MomentumPanel } from "./components/MomentumPanel";
 import { apiGet } from "./api/client";
 import type { Freshness } from "./api/types";
 
 // v1 modules (M1 cut per user decision 2026-10-01, option D).
 const MODULES = [
-  { key: "m3", title: "板块动量 / 轮动", phase: "Phase 2" },
   { key: "m4", title: "聪明钱（13F / 内幕）", phase: "Phase 3" },
   { key: "m5", title: "期权情绪", phase: "Phase 4" },
 ] as const;
@@ -30,6 +30,7 @@ export function App() {
       </p>
       <div style={{ display: "grid", gap: 16 }}>
         <ExposurePanel freshness={fresh["m2"] ?? null} />
+        <MomentumPanel freshness={fresh["m3"] ?? null} />
         {MODULES.map((m) => (
           <Panel
             key={m.key}
