@@ -9,8 +9,10 @@
 |---|--------|------|------|------|
 | 1 | ETF.com 免费页 | M1 | ⛔ NO-GO（主源证伪） | 免费页仅全市场 Top 10 申购/赎回榜，无 11 只板块 ETF 逐日流 |
 | 1b | ETF.com 个股页 fund-flow 接口 | M1 | ⛔ NO-GO | 个股 Fund Flows tab 需登录才渲染数据，无公开 XHR（浏览器实测 2026-10-01） |
-| 1c | ETFdb 免费页 | M1 | ⚠️ 仅汇总口径 | 仅 5日/1月/3月…净流入汇总（如 XLK 5日 +313.85M），无逐日序列 |
+| 1c | ETFdb 免费页 | M1 | ⚠️ 仅汇总口径 | 仅 5日/1月/3月…净流入汇总（如 XLK 5日 +313.85M），无逐日序列；robots 允许 `/etf/`（`Crawl-delay: 3` 须遵守） |
 | 1d | stockanalysis 免费页 | M1 | ⛔ NO-GO | `/etf/xlk/` 静态 HTML 无 fund-flow 数据 |
+| 1e | Nasdaq 免费 API | M1 | ⛔ NO-GO | `api/quote/XLK/info` 无 flow/shares 字段（E spike 关闭） |
+| 1f | SSGA 同目录 fund-level 文件 | M1 | ⛔ NO-GO | 目录无 listing（F spike 关闭） |
 | 2 | SSGA 官方每日持仓 XLSX | M2 | ✅ GO | 200 + 可解析，T-1 口径已确认 |
 | 3 | Yahoo chart API（EOD） | M3 | ✅ GO | 64 根日 K（含当日），无 key；Tiingo 为备选（需免费注册 token） |
 | 4 | CBOE 每日 put/call | M5 | ✅ GO | 服务端渲染 HTML，`?dt=` 切日期，无需登录 |
@@ -40,7 +42,8 @@
   → 200，`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`，22KB。
 - openpyxl 解析验证：sheet `holdings`，表头 `(Name, Ticker, Identifier, SEDOL, Weight, Sector, Shares Held, Local Currency)`，
   文件标注 `As of 30-Sep-2026`（当日 10-01 → **T-1 口径确认**）。
-- 官方源，免费，无 ToS 风险。11 只 ticker 套用同一 URL 模式。
+- 11 只 ticker 同 URL 模式全部验证通过（2026-10-01 实测 11/11 返回 200）。
+- 官方源，免费，无 ToS 风险。
 
 ### 3. EOD 行情（M3）— GO（Yahoo 主，Tiingo 备）
 - `https://query1.finance.yahoo.com/v8/finance/chart/XLK?interval=1d&range=3mo`
@@ -62,6 +65,7 @@
 
 ## 待办（阻塞 Phase 1 开工）
 - [x] 浏览器任务返回：CBOE put/call 真实地址 → GO（服务端渲染 HTML + `?dt=`）
-- [x] M1 数据源穷尽验证 → NO-GO（$0），备选 A–D 待用户决策
-- [ ] 红队审查 Phase 0
+- [x] M1 数据源穷尽验证 → NO-GO（$0 逐日）；收敛为 A（ETFdb 近5日净流入）vs D（砍 M1），**待用户决策**
+- [x] 红队审查 Phase 0 → CONDITIONAL，3 blocker 已修（REDTEAM.md）
+- [ ] EDGAR 第二出口实测结果（已派，结果待送达；不阻塞 Phase 0 验收）
 - [ ] 用户 VPS 部署后：复验 EDGAR 可达性

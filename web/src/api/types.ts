@@ -26,7 +26,7 @@ export interface SectorMomentum {
 
 export interface PutCallRatio {
   as_of: string;
-  scope: "total" | "equity" | "index";
+  scope: "total" | "equity" | "index" | "vix" | "etp";
   ratio: number;
 }
 

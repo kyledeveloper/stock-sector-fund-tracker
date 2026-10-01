@@ -1,3 +1,8 @@
+# Intended as a USER-level systemd unit: install to ~/.config/systemd/user/
+# on the VPS, then `systemctl --user enable --now moneyflow-daily.timer`.
+# %h expands to the deploying user's home -- no hardcoded paths.
+# (For a system-wide unit instead, replace %h with the absolute repo path
+# and add User=/Group=.)
 [Unit]
 Description=US Money Flow Tracker - daily pipeline
 Wants=network-online.target
@@ -5,6 +10,6 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/hatch/workspace/us-moneyflow
-Environment=PYTHONPATH=/home/hatch/workspace/us-moneyflow/src
-ExecStart=/home/hatch/workspace/us-moneyflow/.venv/bin/python -m moneyflow.pipeline.daily run-all
+WorkingDirectory=%h/workspace/us-moneyflow
+Environment=PYTHONPATH=%h/workspace/us-moneyflow/src
+ExecStart=%h/workspace/us-moneyflow/.venv/bin/python -m moneyflow.pipeline.daily run-all

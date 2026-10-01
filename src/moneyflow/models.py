@@ -5,7 +5,7 @@ ingest -> store -> compute -> api. Nothing else in the codebase defines
 a competing record shape for these concepts.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -91,7 +91,7 @@ class PutCallRatio(BaseModel):
     """CBOE daily put/call ratio (sentiment proxy, not a flow)."""
 
     as_of: date
-    scope: str  # "total" | "equity" | "index"
+    scope: str  # "total" | "equity" | "index" | "vix" | "etp" (CBOE publishes all five)
     ratio: float
 
 
@@ -108,9 +108,13 @@ class FilingEvent(BaseModel):
 
 
 class Freshness(BaseModel):
-    """Freshness watchdog record per module."""
+    """Freshness watchdog record per module.
+
+    checked_at is a datetime server-side; it serializes to an ISO-8601
+    string over the API, which is what web/src/api/types.ts mirrors.
+    """
 
     module: str  # "m1".."m5"
     as_of: date | None
-    checked_at: str = ""
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     stale: bool = False

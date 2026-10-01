@@ -9,6 +9,9 @@
 - 后端：Python 3.12 / FastAPI / Pydantic v2 / SQLAlchemy 2.0 / httpx / pandas+openpyxl / typer
 - 数据库：SQLite（WAL 模式）+ 版本化 SQL migration（手写 runner，不引入 Alembic）
 - 调度：systemd timer，每日 15:00 PDT 后跑（美股收盘 13:00 PDT，EOD 数据约 14:30 PDT 可得）
+- 交易日历（红队 M4）：timer 每天都会触发，但 pipeline 入口必须先判断是否为美股交易日；
+  非交易日（周末/节假日）直接跳过写入，只更新 `freshness.checked_at`。
+  禁止把周五的数据按周六日期入库（静默污染时间序列）。Phase 1 实现 `trading_day` helper。
 - 前端：React + TypeScript + Vite + ECharts；独立静态应用，后端仅 serve 构建产物
 - 产品矩阵预留：API 统一版本化 `/api/v1`，前后端完全解耦（无 SSR、无模板耦合），将来可整体迁入 monorepo 或独立域名
 - 测试：pytest + vcrpy（外部 API 录制回放）+ freezegun + ruff（lint+format）
@@ -28,17 +31,22 @@ src/moneyflow/
   common/http.py   # 共享 httpx 客户端：合规 UA、重试、限流
 ```
 
-- 依赖方向：`ingest`/`compute` 只能依赖 `models`；`api` 只调 `services`。
-  由 `tests/test_architecture.py` 强制断言，违规即红灯。
+- 依赖方向：`ingest` → `models`/`common`；`compute` → 仅 `models`（纯函数，
+  连 `common` 都不许碰，杜绝 I/O 旁路）；`api` 只调 `services`。
+  由 `tests/test_architecture.py` 强制断言（含相对导入解析），违规即红灯。
 - 单文件软上限 ~300 行；DoD 用三类硬性测试（parser 契约 / 幂等重跑 / 新鲜度告警），覆盖率数字仅参考。
 
 ## 模块
 
 - M1 板块资金流：11 只 GICS 板块 ETF（XLK/XLF/XLE/XLV/XLI/XLP/XLY/XLU/XLRE/XLC/XLB）
-  每日净流入/流出、净流入/AUM、多日连续同向
+  每日净流入/流出、净流入/AUM、多日连续同向。
+  ⚠️ Phase 0 PoC 裁决：$0 无认证条件下无逐日资金流数据源（见 docs/POC.md）。
+  v1 降级为 ETFdb **近5日净流入**（每日更新的 5 日窗口，诚实标注口径），待用户拍板 A/D 方案。
 - M2 配置型资金敞口（估算）：SSGA 官方持仓 × 板块流 → 个股敞口排名；
   面板强制标注"估算、含机械流、实物申赎下成分股未必被买入"；禁用"主力/聪明钱"标签
-- M3 板块动量/轮动：11 板块 ETF vs SPY 的 20/60 日相对强弱，简化 RRG 四象限
+- M3 板块动量/轮动：11 板块 ETF vs SPY 的 20/60 日相对强弱，简化 RRG 四象限。
+  EOD 源用 Yahoo chart API（T+1 日频）；adapter 必须丢弃未收盘的当日 bar（红队 M5），
+  不得以盘中价污染日 K 动量。
 - M4 聪明钱（收缩版）：自选机构观察名单的 13F-HR（45 天滞后）+ Form 4（2 天滞后），双子面板
 - M5 期权情绪：CBOE total + equity 双口径 put/call ratio（附解读注释）
 
