@@ -11,7 +11,7 @@
 | 1b | ETF.com 个股页 fund-flow 接口 | M1 | ⏳ 待定 | 已派浏览器任务抓 XHR 接口；若找到则 GO |
 | 2 | SSGA 官方每日持仓 XLSX | M2 | ✅ GO | 200 + 可解析，T-1 口径已确认 |
 | 3 | Yahoo chart API（EOD） | M3 | ✅ GO | 64 根日 K（含当日），无 key；Tiingo 为备选（需免费注册 token） |
-| 4 | CBOE 每日 put/call | M5 | ⏳ 待定 | 页面有数据但 curl 抓不到（JS 渲染）；已派浏览器任务抓 XHR 接口 |
+| 4 | CBOE 每日 put/call | M5 | ✅ GO | 服务端渲染 HTML，`?dt=` 切日期，无需登录 |
 | 5 | SEC EDGAR | M4 | ⚠️ 条件 GO | 本机 egress IP 被 SEC 拦截（403）；代码层合规已就绪，部署 VPS 上需复验 |
 
 ## 逐项记录
@@ -35,10 +35,12 @@
 - 非官方接口（ToS 灰色地带，广泛使用但可能变更）；**备选 Tiingo** 免费 tier 需注册 token（500 symbols/月，12 个标的够用）。
 - Finnhub 免费 tier 的 `/stock/candle` 稳定 403 —— 已排除，不再考虑。
 
-### 4. CBOE put/call（M5）— 待定
-- 页面 `https://www.cboe.com/us/options/market_statistics/daily/` 有 TOTAL(0.88)/INDEX(1.03)/EQUITY(0.53) 等比率（文本抓取验证）。
-- curl 直接取页面拿不到表格（Next.js 客户端渲染）；旧 CSV 路径（`/publish/scheduledtask/...`）已 404，CDN 猜测路径 403。
-- 浏览器任务抓 XHR 接口中。拿到接口则 GO，否则降级为"页面文本解析"（需浏览器渲染，不适合 cron）或 M5 推迟。
+### 4. CBOE put/call（M5）— GO
+- 真实地址（旧 `/us/options/market_statistics/daily/` 已迁移）：
+  `https://www.cboe.com/markets/us/options/market-statistics/daily?dt=YYYY-MM-DD`
+  省略 `dt` 返回最近交易日。curl 验证：200，447KB HTML，内嵌 `"TOTAL PUT/CALL RATIO","value":"0.88"`。
+- 无公开 JSON XHR（Next.js 服务端渲染 + RSC），采集方式 = **解析服务端渲染 HTML 表格**，无需登录、无反爬迹象。
+- 口径：TOTAL / INDEX / EQUITY / VIX / ETP 五个比率（页面文本抓取已验证数值）。
 
 ### 5. EDGAR（M4）— 条件 GO
 - `curl -A "us-moneyflow/0.1 (+...)" https://data.sec.gov/submissions/CIK0001067983.json` → UA 发送正确，但返回 403（SEC 按 egress IP 拦截自动化工具；`www.sec.gov` 同样 403）。
@@ -46,6 +48,6 @@
 - **部署到用户 VPS 后必须复验**（Phase 4 DoD 的一部分）；若 VPS IP 同样被拦，备选：SEC 公司概念 API 同源、或延迟到 Phase 5 用浏览器任务中转。
 
 ## 待办（阻塞 Phase 1 开工）
+- [x] 浏览器任务返回：CBOE put/call 真实地址 → GO（服务端渲染 HTML + `?dt=`）
 - [ ] 浏览器任务返回：ETF.com 个股 fund-flow XHR 接口 → 决定 M1 最终源
-- [ ] 浏览器任务返回：CBOE put/call XHR 接口 → 决定 M5 采集方式
 - [ ] 用户 VPS 部署后：复验 EDGAR 可达性
