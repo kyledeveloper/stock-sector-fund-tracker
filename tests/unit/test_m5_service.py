@@ -56,9 +56,7 @@ def test_run_m5_writes_row_and_marks_freshness(engine):
         requested.append(str(request.url))
         return httpx.Response(200, text=SAMPLE)
 
-    result = m5_service.run_m5(
-        engine, trade_date=date(2026, 9, 30), client=_mock_client(handler)
-    )
+    result = m5_service.run_m5(engine, trade_date=date(2026, 9, 30), client=_mock_client(handler))
     assert result["skipped"] is False
     assert result["total_put_call"] == pytest.approx(0.88)
     assert result["equity_put_call"] == pytest.approx(0.53)
@@ -79,9 +77,7 @@ def test_run_m5_parse_none_skips_write(engine):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=WEEKEND)
 
-    result = m5_service.run_m5(
-        engine, trade_date=date(2026, 9, 27), client=_mock_client(handler)
-    )
+    result = m5_service.run_m5(engine, trade_date=date(2026, 9, 27), client=_mock_client(handler))
     assert result["skipped"] is True
     repo, freshness = _repos(engine)
     assert repo.latest() is None  # never write a dirty row
@@ -94,9 +90,7 @@ def test_run_m5_garbled_page_raises(engine):
         return httpx.Response(200, text="<html><body>redesigned</body></html>")
 
     with pytest.raises(m5_service.CboeParseError):
-        m5_service.run_m5(
-            engine, trade_date=date(2026, 9, 30), client=_mock_client(handler)
-        )
+        m5_service.run_m5(engine, trade_date=date(2026, 9, 30), client=_mock_client(handler))
     repo, _ = _repos(engine)
     assert repo.latest() is None  # fail-loud: nothing stored
 
