@@ -215,3 +215,44 @@ EOD 数据源：用户决策（2026-10-01）**先用 Yahoo**（chart API，adj c
 4. 真实数据冒烟（2026-10-01 曾验证 EFTS 模式：2 天 1119 hits，分页 `size=100`）。
 
 最终：110 tests passed，ruff check + format clean，React 构建通过（含新增徽标/列/提示条）。
+
+---
+
+# REDTEAM — Phase 4（M5 CBOE put/call 情绪）独立审查（2026-10-02）
+
+审查人：独立红队子代理（两轮：首轮发现 → 修复 → 第二轮复核）→ 蓝队修复 → 本文件为最终记录。
+
+## 总 verdict：NO-GO → blocker + 3 major 修复后，第二轮复核 GO
+
+## 🔴 Blocker（已修复，第二轮验证）
+
+| # | 问题 | 修复 | 验证 |
+|---|------|------|------|
+| B1 | `CboePutCallRepository.series()` 用 `ORDER BY trade_date ASC LIMIT :days`，表行数超 days 后返回**最旧** N 行而非 trailing-N；面板静默画出几个月前的数据且 freshness 显示 fresh（最坏的静默错数据）；`test_series_orders_asc_and_respects_limit` 把错误行为 pin 成契约 | subquery 先 `ORDER BY trade_date DESC LIMIT :days` 取最新 N 个日期，外层 `ORDER BY ASC`；测试重命名为 `test_series_returns_trailing_n_oldest_first`，3 行 + days=2 断言掉队的是最旧行 | 红队第二轮 scratch-DB 实证：旧 SQL 返回 09-28/09-29，新 SQL 返回 09-29/09-30；API `as_of`/`stale` 基于正确窗口 |
+
+## 🟠 Major（已修复 3/3，第二轮验证）
+
+| # | 问题 | 修复 | 验证 |
+|---|------|------|------|
+| M1 | sanity bound `[0, 30]` 有洞：10x shift（0.88→8.8）与 100x shift 落在 [0,30] 内（如 0.25→25.0）静默入库；注释过度承诺"拦截 100x decimal shift" | bound 收紧为 `[0, 5.0]`（真实日频 put/call 比率极少超 2，index 极端也难破 5）；注释如实记录"落在 [0,5] 内的 shift 无法靠 range 捕获"的局限 | fixture 真值 0.88/1.03/0.53 通过；8.8 与 25.0 均 `CboeParseError`；新增 `test_parse_10x_decimal_shift_fails_loud` / `test_parse_100x_shift_inside_old_bound_fails_loud`（红队确认旧 bound 下两者都静默通过，非空测试） |
+| M2 | backfill 的 `upsert` 在 try/except 之外：某日 DB 写失败直接 abort 整个 90 天回填，且失败**不在** errors 列表（与文档"单日失败记录并继续"矛盾） | upsert 移入内层 try/except：`session.rollback()` → `errors.append({"trade_date", "error": "upsert ..."})` → `continue` | 新增 `test_backfill_upsert_failure_isolated_and_recorded`：monkeypatch upsert 单日抛错，断言 errors 记录、其余天照常入库、坏日未存储 |
+| M3 | `run_backfill_m5` 从不写 freshness：跑完 backfill、首次 daily run 前打开前端，`Panel.tsx` 按"未知即 stale"规则永久灰显（与 m3/m4 backfill 会 mark 不一致） | backfill 结束后独立 session：`fetched>0` → `mark("m5", 实际入库的最大日期)`；零 fetched → `touch("m5")`（touch 的 ON CONFLICT 只更新 checked_at，不覆盖已有 as_of） | 新增 `test_backfill_marks_freshness`：断言 `rec[0] == max(入库日期)`；红队确认 rollback 不污染后续 commit，mark 用独立 session |
+
+## ✅ 红队验证通过项（两轮抽样证据）
+
+- Parser：fixture 为小数值（0.88），`float()` 直接解析无 ×100/÷100 错误；`"67%"`/`"88"`（无百分号）→ fail-loud；`--`/空/`n/a` → fail-loud；周末 fixture 含 `Daily Market Statistics` marker 且零 ratio 行 → None（跳过不写）；23 个 ratio 行标签脚本验证各自唯一、精确单元格匹配无错位归因。
+- Upsert：`007_m5_cboe.sql` 建表（`trade_date TEXT PRIMARY KEY`）+ `ON CONFLICT DO UPDATE` 单行 upsert，无 delete-then-insert；重跑幂等。
+- Backfill：周末/节假日在发请求前跳过（`is_trading_day` 先行，测试 pin "零请求"）；≥2s 真实实现（`PoliteClient._polite_wait` 每次 `get()` 前强制等待，backfill 共用一个 scraper）；fetch/parse 单日失败隔离 + 记入 errors。
+- days 越界：`max(1, min(365, days))`（0/负→1，100000→365，非整数→FastAPI 422 非 500）。
+- 前端 null：`numOrNull` + `connectNulls: false` + tooltip `v == null ? "—"`，缺失点留 gap 而非 0。
+- 死引用：全 repo grep `ingest.cboe` 零命中（`ingest/cboe.py` stub 已删，被 `services/cboe.py` 替代）。
+- 架构：cboe.py 269 行（含 parser+scraper+service 三薄层）未超 300 行预算；freshness T+1 与其他模块一致；`run-all` 非交易日只 touch 不写 m5。
+
+## ⚠️ VPS 上线前验证清单（沙盒 SEC 403，CBOE 未实测，必须在 VPS 执行）
+
+1. CBOE 连通性：`m5` 单次抓取返回 200 且 ratio 在 [0.3, 2.0] 合理区间。
+2. `backfill-m5` 干跑：`cboe_putcall` 行数 ≈ 90 天内交易日数；抽查 `total_put_call` 在 0.3–2.0 区间。
+3. systemd timer dry-run：`systemctl start moneyflow.service` 一次性验证，日志干净后再 `enable --now` timer。
+4. Phase 3 遗留（见上节 ⚠️）：EFTS 去 `q` 数量对比、`forms=4` 含 4/A 确认、`backfill-m4` 全量。
+
+最终：134 tests passed，ruff check + format clean，React build 通过。第二轮红队 verdict GO。
