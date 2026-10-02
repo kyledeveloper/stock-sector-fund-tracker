@@ -135,6 +135,124 @@ class FilingEvent(BaseModel):
     lag_note: str = ""  # e.g. "13F: 45-day lag"
 
 
+class ThirteenFHolding(BaseModel):
+    """One parsed 13F-HR information-table row (a quarter's position)."""
+
+    report_date: date  # quarter end
+    filed_at: date  # when the 13F-HR was filed
+    cik: str  # 10-digit, zero-padded
+    filer_name: str = ""
+    issuer: str  # nameOfIssuer, e.g. "PALANTIR TECHNOLOGIES INC"
+    cusip: str
+    title_of_class: str = ""
+    value_usd: float  # 13F reports whole dollars
+    shares: int
+    put_call: str = ""  # "" = common stock; "Call"/"Put" = option leg
+
+
+class ThirteenFFilingRef(BaseModel):
+    """Pointer to the newest 13F-HR in a submissions JSON."""
+
+    accession_number: str  # with dashes, e.g. 0001649339-25-000007
+    filing_date: date
+    report_date: date
+
+
+class ThirteenFPositionView(BaseModel):
+    """Latest-quarter 13F position + QoQ status (read model for the panel)."""
+
+    report_date: date
+    filed_at: date
+    cik: str
+    filer_name: str = ""
+    issuer: str
+    cusip: str
+    value_usd: float  # 0 for exited positions
+    shares: int  # 0 for exited positions
+    put_call: str = ""
+    status: str = ""  # new|exited|increased|decreased|unchanged
+    value_delta_usd: float = 0.0
+    prev_value_usd: float | None = None
+
+
+class InsiderTransaction(BaseModel):
+    """One Form 4 non-derivative transaction."""
+
+    transaction_date: date
+    transaction_code: str  # P = open-market purchase, S = sale, ...
+    acquired_disposed: str  # "A" | "D"
+    shares: int
+    price: float | None = None
+    value_usd: float | None = None  # shares * price
+    side: str = ""  # "buy" | "sell" (from acquired/disposed)
+    is_open_market_buy: bool = False  # code P + acquired
+    is_10b5_1: bool = False
+
+
+class Form4Filing(BaseModel):
+    """Parsed Form 4 ownership document (one filing)."""
+
+    ticker: str  # issuerTradingSymbol -- Form 4 HAS the ticker (unlike 13F)
+    issuer: str = ""
+    issuer_cik: str = ""
+    insider: str = ""
+    insider_cik: str = ""
+    officer_title: str = ""
+    is_officer: bool = False
+    is_director: bool = False
+    is_ten_percent_owner: bool = False
+    filed_at: date
+    accession_number: str = ""
+    transactions: list[InsiderTransaction] = []
+
+
+class InsiderBuyView(BaseModel):
+    """Officer/director open-market buy for the Form 4 panel (read model)."""
+
+    ticker: str
+    issuer: str = ""
+    insider: str = ""
+    officer_title: str = ""
+    filed_at: date
+    transaction_date: date
+    shares: int
+    price: float | None = None
+    value_usd: float | None = None
+    is_10b5_1: bool = False
+
+
+class ManagerPositionsView(BaseModel):
+    """One manager's latest 13F quarter for the panel (read model)."""
+
+    cik: str
+    filer_name: str = ""
+    report_date: date
+    filed_at: date
+    positions: list[ThirteenFPositionView]  # top-N current positions by value
+    exited_count: int = 0
+    new_count: int = 0
+
+
+# M4 13F watchlist: (display name, CIK). Approved by the user 2026-10-01
+# (12 managers). CIKs cross-verified multi-source; verify_filer_name
+# re-checks each CIK's registered name against EDGAR at runtime --
+# a wrong CIK fails loud instead of attributing holdings to the wrong manager.
+M4_WATCHLIST: tuple[tuple[str, str], ...] = (
+    ("Berkshire Hathaway", "1067983"),
+    ("Pershing Square", "1336528"),
+    ("Duquesne Family Office", "1536411"),
+    ("Baupost Group", "1061768"),
+    ("Third Point", "1040273"),
+    ("Appaloosa", "1656456"),
+    ("Tiger Global", "1167483"),
+    ("Scion Asset Management", "1649339"),
+    ("Himalaya Capital", "1709323"),
+    ("Viking Global", "1103804"),
+    ("Soros Fund Management", "1029160"),
+    ("Elliott Investment Management", "1791786"),
+)
+
+
 class Freshness(BaseModel):
     """Freshness watchdog record per module.
 

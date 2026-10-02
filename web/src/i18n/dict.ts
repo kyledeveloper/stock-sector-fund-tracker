@@ -56,6 +56,25 @@ export const zh = {
       improving: "改善",
     },
   },
+  m4: {
+    f13Title: "13F 持仓 · 机构观察名单",
+    f13Desc:
+      "12 家机构最新季度 13F 持仓 Top 15。季度披露，滞后约45天；仅多头持仓，不含空头与现金；无 ticker 映射，显示发行人名称。",
+    reportDate: "报告期",
+    filedAt: "披露日",
+    colIssuer: "发行人",
+    colValue: "市值",
+    colShares: "股数",
+    colChange: "环比",
+    statusNew: "新建仓",
+    statusIncreased: "加仓",
+    statusDecreased: "减仓",
+    statusUnchanged: "不变",
+    exitedLine: "本季清仓 {n} 只",
+    optionLeg: "期权",
+    noData:
+      "暂无数据（先运行回填：python -m moneyflow.pipeline.daily backfill-m4）",
+  },
 };
 
 export type Dict = typeof zh;
@@ -106,5 +125,24 @@ export const en: Dict = {
       lagging: "Lagging",
       improving: "Improving",
     },
+  },
+  m4: {
+    f13Title: "13F Holdings · Manager Watchlist",
+    f13Desc:
+      "Top-15 positions from the latest quarterly 13F of 12 managers. Quarterly filings with ~45-day lag; long positions only, no shorts or cash; issuer names shown (no ticker mapping in v1).",
+    reportDate: "Report date",
+    filedAt: "Filed",
+    colIssuer: "Issuer",
+    colValue: "Value",
+    colShares: "Shares",
+    colChange: "QoQ",
+    statusNew: "New",
+    statusIncreased: "Added",
+    statusDecreased: "Trimmed",
+    statusUnchanged: "Unchanged",
+    exitedLine: "{n} exited this quarter",
+    optionLeg: "Option",
+    noData:
+      "No data yet (run the backfill first: python -m moneyflow.pipeline.daily backfill-m4)",
   },
 };

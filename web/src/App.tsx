@@ -2,15 +2,13 @@ import { useEffect, useState } from "react";
 import { Panel } from "./components/Panel";
 import { ExposurePanel } from "./components/ExposurePanel";
 import { MomentumPanel } from "./components/MomentumPanel";
+import { ThirteenFPanel } from "./components/ThirteenFPanel";
 import { LangToggle, useLang } from "./i18n/LangContext";
 import { apiGet } from "./api/client";
 import type { Freshness } from "./api/types";
 
 // v1 modules (M1 cut per user decision 2026-10-01, option D).
-const MODULES = [
-  { key: "m4", phase: "Phase 3" },
-  { key: "m5", phase: "Phase 4" },
-] as const;
+const MODULES = [{ key: "m5", phase: "Phase 4" }] as const;
 
 export function App() {
   const { t } = useLang();
@@ -24,8 +22,7 @@ export function App() {
       .catch(() => setFresh({}));
   }, []);
 
-  const moduleTitle = (key: string) =>
-    key === "m4" ? t((d) => d.modules.m4) : t((d) => d.modules.m5);
+  const moduleTitle = () => t((d) => d.modules.m5);
 
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", padding: 24 }}>
@@ -43,10 +40,11 @@ export function App() {
       <div style={{ display: "grid", gap: 16 }}>
         <ExposurePanel freshness={fresh["m2"] ?? null} />
         <MomentumPanel freshness={fresh["m3"] ?? null} />
+        <ThirteenFPanel freshness={fresh["m4"] ?? null} />
         {MODULES.map((m) => (
           <Panel
             key={m.key}
-            title={moduleTitle(m.key)}
+            title={moduleTitle()}
             module={m.key}
             freshness={fresh[m.key] ?? null}
           >

@@ -11,6 +11,7 @@ import typer
 from moneyflow.common.trading_day import is_trading_day, today_et
 from moneyflow.services import m2 as m2_service
 from moneyflow.services import m3 as m3_service
+from moneyflow.services import m4 as m4_service
 from moneyflow.services.freshness import MODULES
 from moneyflow.store.db import SessionLocal, get_engine
 from moneyflow.store.migrate import apply_migrations
@@ -42,7 +43,14 @@ def run_all(engine=None) -> dict:
         return {"skipped": True, "today": today}
     m2_result = m2_service.run_m2(engine)
     m3_result = m3_service.run_m3(engine)
-    return {"skipped": False, "today": today, "m2": m2_result, "m3": m3_result}
+    m4_result = m4_service.run_13f(engine)
+    return {
+        "skipped": False,
+        "today": today,
+        "m2": m2_result,
+        "m3": m3_result,
+        "m4": m4_result,
+    }
 
 
 @app.command()
@@ -89,7 +97,34 @@ def backfill_m3() -> None:
 
 @app.command()
 def m4() -> None:
-    raise NotImplementedError("Phase 3: smart money (not built yet)")
+    """M4: EDGAR 13F-HR (12-manager watchlist, quarterly) + Form 4 scan.
+
+    13F is quarterly: the daily run only re-fetches a manager when a new
+    quarter appears (12 cheap submissions checks). Form 4 runs its daily
+    scan once implemented (currently: 13F side only).
+    """
+    today = today_et()
+    if not is_trading_day(today):
+        typer.echo(f"{today}: not a trading day, m4 skipped (same gate as run-all).")
+        return
+    result = m4_service.run_13f(_engine())
+    typer.echo(
+        f"m4 done: {result['checked']} managers checked, "
+        f"{result['fetched']} new quarters, {result['holdings']} holdings."
+    )
+
+
+@app.command(name="backfill-m4")
+def backfill_m4() -> None:
+    """M4 backfill: full 13F-HR pull for all 12 watchlist managers.
+
+    One-off before the first daily run. Idempotent by upsert; safe to
+    re-run. The first stored quarter shows all positions as "new"; the
+    QoQ diff activates when the next quarter is filed.
+    NOTE: live EDGAR pull -- needs non-403 egress (the user's VPS).
+    """
+    result = m4_service.run_13f(_engine())
+    typer.echo(f"m4 backfill done: {result['fetched']} managers, {result['holdings']} holdings.")
 
 
 @app.command()
@@ -105,7 +140,9 @@ def run_all_cmd() -> None:
     else:
         typer.echo(
             f"{result['today']}: m2 ok ({result['m2']['exposures']} exposures), "
-            f"m3 ok ({result['m3']['sectors']} sectors)."
+            f"m3 ok ({result['m3']['sectors']} sectors), "
+            f"m4 ok ({result['m4']['checked']} managers checked, "
+            f"{result['m4']['fetched']} new quarters)."
         )
 
 

@@ -11,13 +11,14 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from moneyflow.api.routers import exposure, freshness, health, momentum
+from moneyflow.api.routers import exposure, filings, freshness, health, momentum
 
 app = FastAPI(title="US Money Flow Tracker", version="0.1.0")
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(freshness.router, prefix="/api/v1")
 app.include_router(exposure.router, prefix="/api/v1")
 app.include_router(momentum.router, prefix="/api/v1")
+app.include_router(filings.router, prefix="/api/v1")
 
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
 if WEB_DIST.exists():  # React build output; absent until `npm run build`

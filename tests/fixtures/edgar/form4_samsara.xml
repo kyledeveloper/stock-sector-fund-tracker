@@ -1,0 +1,130 @@
+<ownershipDocument>
+<schemaVersion>X0609</schemaVersion>
+<documentType>4</documentType>
+<periodOfReport>2026-09-29</periodOfReport>
+<issuer>
+<issuerCik>0001642896</issuerCik>
+<issuerName>Samsara Inc.</issuerName>
+<issuerTradingSymbol>IOT</issuerTradingSymbol>
+<issuerForeignTradingSymbol/>
+</issuer>
+<reportingOwner>
+<reportingOwnerId>
+<rptOwnerCik>0001895111</rptOwnerCik>
+<rptOwnerName>Biswas Sanjit</rptOwnerName>
+</reportingOwnerId>
+<reportingOwnerAddress>
+<rptOwnerNonUSAddressFlag>false</rptOwnerNonUSAddressFlag>
+<rptOwnerStreet1>C/O SAMSARA INC.</rptOwnerStreet1>
+<rptOwnerStreet2>1 DE HARO STREET</rptOwnerStreet2>
+<rptOwnerCity>SAN FRANCISCO</rptOwnerCity>
+<rptOwnerState>CA</rptOwnerState>
+<rptOwnerZipCode>94107</rptOwnerZipCode>
+<rptOwnerStateDescription/>
+</reportingOwnerAddress>
+<reportingOwnerRelationship>
+<isDirector>true</isDirector>
+<isOfficer>true</isOfficer>
+<isTenPercentOwner>true</isTenPercentOwner>
+<isOther>false</isOther>
+<officerTitle>CHIEF EXECUTIVE OFFICER</officerTitle>
+<otherText/>
+</reportingOwnerRelationship>
+</reportingOwner>
+<aff10b5One>1</aff10b5One>
+<nonDerivativeTable>
+<nonDerivativeTransaction>
+<securityTitle>
+<value>Class A Common Stock</value>
+</securityTitle>
+<transactionDate>
+<value>2026-09-29</value>
+</transactionDate>
+<transactionCoding>
+<transactionFormType>4</transactionFormType>
+<transactionCode>S</transactionCode>
+<equitySwapInvolved>0</equitySwapInvolved>
+<footnoteId id="F1"/>
+</transactionCoding>
+<transactionAmounts>
+<transactionShares>
+<value>101968</value>
+</transactionShares>
+<transactionPricePerShare>
+<value>37.6769</value>
+<footnoteId id="F2"/>
+</transactionPricePerShare>
+<transactionAcquiredDisposedCode>
+<value>D</value>
+</transactionAcquiredDisposedCode>
+</transactionAmounts>
+<postTransactionAmounts>
+<sharesOwnedFollowingTransaction>
+<value>983867</value>
+<footnoteId id="F3"/>
+</sharesOwnedFollowingTransaction>
+</postTransactionAmounts>
+<ownershipNature>
+<directOrIndirectOwnership>
+<value>I</value>
+</directOrIndirectOwnership>
+<natureOfOwnership>
+<value>See footnote</value>
+<footnoteId id="F4"/>
+</natureOfOwnership>
+</ownershipNature>
+</nonDerivativeTransaction>
+<nonDerivativeTransaction>
+<securityTitle>
+<value>Class A Common Stock</value>
+</securityTitle>
+<transactionDate>
+<value>2026-09-30</value>
+</transactionDate>
+<transactionCoding>
+<transactionFormType>4</transactionFormType>
+<transactionCode>S</transactionCode>
+<equitySwapInvolved>0</equitySwapInvolved>
+<footnoteId id="F1"/>
+</transactionCoding>
+<transactionAmounts>
+<transactionShares>
+<value>76359</value>
+</transactionShares>
+<transactionPricePerShare>
+<value>38.3926</value>
+<footnoteId id="F13"/>
+</transactionPricePerShare>
+<transactionAcquiredDisposedCode>
+<value>D</value>
+</transactionAcquiredDisposedCode>
+</transactionAmounts>
+<postTransactionAmounts>
+<sharesOwnedFollowingTransaction>
+<value>899264</value>
+<footnoteId id="F4"/>
+</sharesOwnedFollowingTransaction>
+</postTransactionAmounts>
+<ownershipNature>
+<directOrIndirectOwnership>
+<value>I</value>
+</directOrIndirectOwnership>
+<natureOfOwnership>
+<value>See footnote</value>
+<footnoteId id="F4"/>
+</natureOfOwnership>
+</ownershipNature>
+</nonDerivativeTransaction>
+</nonDerivativeTable>
+<derivativeTable/>
+<footnotes>
+<footnote id="F1">The sales were effected pursuant to a Rule 10b5-1 trading plan adopted on September 29, 2025.</footnote>
+<footnote id="F2">The "Amount" and "Price" reported in this Column 4 reflect the aggregate number and weighted-average price, respectively, of shares sold in multiple transactions.</footnote>
+<footnote id="F4">Consists of shares held by the Biswas Family Trust.</footnote>
+<footnote id="F13">The "Amount" and "Price" reported in this Column 4 reflect the aggregate number and weighted-average price, respectively, of shares sold in multiple transactions.</footnote>
+</footnotes>
+<ownerSignature>
+<signatureName>/s/ Adam Eltoukhy, attorney-in-fact on behalf of Sanjit Biswas</signatureName>
+<signatureDate>2026-10-01</signatureDate>
+</ownerSignature>
+</ownershipDocument>

@@ -48,6 +48,31 @@ export interface StockExposure {
   contributing_etfs: string[];
 }
 
+export interface ThirteenFPositionView {
+  report_date: string;
+  filed_at: string;
+  cik: string;
+  filer_name: string;
+  issuer: string;
+  cusip: string;
+  value_usd: number;
+  shares: number;
+  put_call: string; // "" | "Call" | "Put"
+  status: "new" | "exited" | "increased" | "decreased" | "unchanged" | "";
+  value_delta_usd: number;
+  prev_value_usd: number | null;
+}
+
+export interface ManagerPositionsView {
+  cik: string;
+  filer_name: string;
+  report_date: string; // quarter end
+  filed_at: string; // disclosure date (~45d lag)
+  positions: ThirteenFPositionView[]; // top-N by value
+  exited_count: number;
+  new_count: number;
+}
+
 export interface Freshness {
   module: "m2" | "m3" | "m4" | "m5"; // M1 cut from v1 (user D, 2026-10-01)
   as_of: string | null;
