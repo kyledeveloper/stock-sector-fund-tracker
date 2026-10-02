@@ -10,8 +10,10 @@ from moneyflow.store.repos.freshness import FreshnessRepository
 from moneyflow.store.repos.m2 import ExposureRepository, HoldingRepository
 from moneyflow.store.repos.m3 import PriceBarRepository, SectorMomentumRepository
 from moneyflow.store.repos.m4 import Form4Repository, ThirteenFHoldingRepository
+from moneyflow.store.repos.m5 import CboePutCallRepository
 
 __all__ = [
+    "CboePutCallRepository",
     "ExposureRepository",
     "Form4Repository",
     "FreshnessRepository",

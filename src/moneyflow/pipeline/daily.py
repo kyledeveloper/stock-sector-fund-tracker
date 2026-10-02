@@ -9,6 +9,7 @@ from __future__ import annotations
 import typer
 
 from moneyflow.common.trading_day import is_trading_day, today_et
+from moneyflow.services import cboe as m5_service
 from moneyflow.services import m2 as m2_service
 from moneyflow.services import m3 as m3_service
 from moneyflow.services import m4 as m4_service
@@ -45,6 +46,7 @@ def run_all(engine=None) -> dict:
     m3_result = m3_service.run_m3(engine)
     m4_13f_result = m4_service.run_13f(engine)
     m4_f4_result = m4_service.run_form4(engine)
+    m5_result = m5_service.run_m5(engine)
     return {
         "skipped": False,
         "today": today,
@@ -52,6 +54,7 @@ def run_all(engine=None) -> dict:
         "m3": m3_result,
         "m4_13f": m4_13f_result,
         "m4_form4": m4_f4_result,
+        "m5": m5_result,
     }
 
 
@@ -150,7 +153,38 @@ def backfill_m4() -> None:
 
 @app.command()
 def m5() -> None:
-    raise NotImplementedError("Phase 4: options sentiment (not built yet)")
+    """M5: CBOE daily put/call ratio (sentiment proxy, not a flow)."""
+    today = today_et()
+    if not is_trading_day(today):
+        typer.echo(f"{today}: not a trading day, m5 skipped (same gate as run-all).")
+        return
+    result = m5_service.run_m5(_engine())
+    if result["skipped"]:
+        typer.echo(f"m5 skipped: {result['reason']} (trade_date={result['trade_date']}).")
+    else:
+        typer.echo(
+            f"m5 done: total {result['total_put_call']}, "
+            f"equity {result['equity_put_call']}, "
+            f"index {result['index_put_call']} "
+            f"as of {result['trade_date']}"
+        )
+
+
+@app.command(name="backfill-m5")
+def backfill_m5() -> None:
+    """M5 backfill: trailing 90 calendar days of CBOE put/call ratios.
+
+    Skips non-trading days before requesting; one request per day with a
+    >=2s interval. Idempotent by upsert; safe to re-run. A single day's
+    failure is recorded and the backfill continues.
+    """
+    result = m5_service.run_backfill_m5(_engine())
+    typer.echo(
+        f"m5 backfill done: {result['fetched']} fetched, "
+        f"{result['skipped']} skipped, {len(result['errors'])} errors."
+    )
+    for e in result["errors"]:
+        typer.echo(f"  ERROR {e['trade_date']}: {e['error']}")
 
 
 @app.command(name="run-all")
@@ -159,13 +193,20 @@ def run_all_cmd() -> None:
     if result["skipped"]:
         typer.echo(f"{result['today']}: not a trading day, writes skipped.")
     else:
+        m5 = result["m5"]
+        m5_info = (
+            f"skipped ({m5['reason']})"
+            if m5["skipped"]
+            else f"total {m5['total_put_call']} as of {m5['trade_date']}"
+        )
         typer.echo(
             f"{result['today']}: m2 ok ({result['m2']['exposures']} exposures), "
             f"m3 ok ({result['m3']['sectors']} sectors), "
             f"m4 ok (13f: {result['m4_13f']['checked']} checked / "
             f"{result['m4_13f']['fetched']} new quarters; "
             f"form4: {result['m4_form4']['fetched']} new filings, "
-            f"{result['m4_form4']['buys']} buys)."
+            f"{result['m4_form4']['buys']} buys), "
+            f"m5 ok ({m5_info})."
         )
 
 

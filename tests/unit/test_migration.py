@@ -32,7 +32,7 @@ def test_splitter_respects_quotes_and_comments():
 def test_apply_real_migrations_twice_is_idempotent():
     engine = _memory_engine()
     first = apply_migrations(engine)
-    assert first == 6  # 001 + 002 + 003_drop_m1 + 004_m2_exposure + 005_m4 + 006_m4_redteam
+    assert first == 7  # 001..006 plus 007_m5_cboe
 
     tables = set(inspect(engine).get_table_names())
     assert "sector_flow" not in tables, "M1 cut: sector_flow must be gone"
@@ -47,6 +47,7 @@ def test_apply_real_migrations_twice_is_idempotent():
         "thirteenf_holding",
         "form4_filing",
         "form4_transaction",
+        "cboe_putcall",
         "freshness",
     ):
         assert expected in tables, f"missing table: {expected}"

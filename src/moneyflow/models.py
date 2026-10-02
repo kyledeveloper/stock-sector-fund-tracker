@@ -115,12 +115,20 @@ class SectorMomentum(BaseModel):
     rrg_quadrant: str = ""  # leading/weakening/lagging/improving
 
 
-class PutCallRatio(BaseModel):
-    """CBOE daily put/call ratio (sentiment proxy, not a flow)."""
+class CboeDaily(BaseModel):
+    """One CBOE U.S. options daily put/call ratio row (M5, sentiment proxy).
 
-    as_of: date
-    scope: str  # "total" | "equity" | "index" | "vix" | "etp" (CBOE publishes all five)
-    ratio: float
+    Replaces the Phase 0 scope-style PutCallRatio placeholder, which was
+    never referenced anywhere. CBOE publishes one value per scope per day;
+    we store the three scopes the panel needs: total, equity, index.
+    """
+
+    trade_date: date
+    total_put_call: float
+    equity_put_call: float
+    index_put_call: float
+    fetched_at: datetime | None = None
+    source_url: str = ""
 
 
 class FilingEvent(BaseModel):
