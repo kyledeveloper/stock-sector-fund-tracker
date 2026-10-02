@@ -63,7 +63,14 @@ def run_13f(engine, client: PoliteClient | None = None) -> dict:
             # truth (report/filed dates, ~45d lag) is labeled per manager
             # in the panel; marking report_date here would gray the panel
             # permanently under the T+1 staleness rule.
-            FreshnessRepository(session).mark("m4", today_et())
+            #
+            # Total outage (checked==0, e.g. SEC 403 on every CIK) must NOT
+            # mark as_of=today: that paints empty 13F/Form4 panels "fresh"
+            # and hides the failure. touch() bumps checked_at only.
+            if stats["checked"] > 0:
+                FreshnessRepository(session).mark("m4", today_et())
+            else:
+                FreshnessRepository(session).touch("m4")
             return stats
         finally:
             session.close()

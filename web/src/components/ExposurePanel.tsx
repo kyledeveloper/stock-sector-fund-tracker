@@ -33,7 +33,7 @@ export function ExposurePanel({ freshness }: { freshness: Freshness | null }) {
   }, []);
 
   useEffect(() => {
-    if (!chartRef.current || !rows) return;
+    if (!chartRef.current || !rows || rows.length === 0) return;
     const chart = echarts.init(chartRef.current);
     const top = [...rows].reverse();
     chart.setOption({
@@ -91,7 +91,9 @@ export function ExposurePanel({ freshness }: { freshness: Freshness | null }) {
       {!error && rows && rows.length === 0 && (
         <p style={{ color: "#999" }}>{t((d) => d.m2.noData)}</p>
       )}
-      <div ref={chartRef} style={{ height: 420 }} />
+      {rows && rows.length > 0 && (
+        <div ref={chartRef} style={{ height: 420 }} />
+      )}
     </Panel>
   );
 }

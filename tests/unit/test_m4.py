@@ -138,6 +138,48 @@ def test_one_manager_failure_isolated(tmp_path):
     assert len(m4_service.latest_13f_views(engine)) == 11
 
 
+def test_total_13f_outage_does_not_mark_fresh(tmp_path):
+    """Total SEC outage (every CIK 403) must not paint m4 as_of=today.
+
+    Live failure mode on blocked egress: checked==0, empty panels, but the
+    old code still marked freshness fresh -- empty 13F/Form4 looked healthy.
+    """
+    from moneyflow.common.trading_day import today_et
+    from moneyflow.store.db import SessionLocal
+    from moneyflow.store.repos import FreshnessRepository
+
+    engine = _engine(tmp_path)
+
+    def all_403(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="forbidden")
+
+    client = PoliteClient(
+        transport=httpx.MockTransport(all_403), trust_env=False, min_interval_s=0
+    )
+    stats = m4_service.run_13f(engine, client=client)
+    assert stats["checked"] == 0 and stats["fetched"] == 0
+    assert len(stats["errors"]) == 12
+    assert m4_service.latest_13f_views(engine) == []
+    session = SessionLocal(bind=engine)
+    try:
+        rec = FreshnessRepository(session).all().get("m4")
+    finally:
+        session.close()
+    assert rec is not None
+    as_of, checked_at = rec
+    assert as_of is None  # touch(), not mark(today)
+    assert checked_at is not None
+    # And a later successful run still marks normally.
+    ok = m4_service.run_13f(engine, client=_mock_client())
+    assert ok["checked"] == 12 and ok["fetched"] == 12
+    session = SessionLocal(bind=engine)
+    try:
+        rec2 = FreshnessRepository(session).all()["m4"]
+    finally:
+        session.close()
+    assert rec2[0] == today_et()
+
+
 def test_watchlist_has_twelve_verified_managers():
     assert len(M4_WATCHLIST) == 12
     ciks = [c for _, c in M4_WATCHLIST]
