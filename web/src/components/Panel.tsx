@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { Freshness } from "../api/types";
+import { useLang } from "../i18n/LangContext";
 
 interface Props {
   title: string;
@@ -18,6 +19,7 @@ interface Props {
  * with a warning instead of silently showing old data.
  */
 export function Panel({ title, freshness, hasData = false, children }: Props) {
+  const { t } = useLang();
   const freshnessUnknown = freshness === null && hasData;
   const stale = freshness?.stale ?? freshnessUnknown;
   return (
@@ -40,11 +42,11 @@ export function Panel({ title, freshness, hasData = false, children }: Props) {
         <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
         <span style={{ fontSize: 12, color: "#666" }}>
           {freshness?.as_of
-            ? `as of ${freshness.as_of} ET`
+            ? t((d) => d.panel.asOf, { date: freshness.as_of })
             : freshnessUnknown
-              ? "freshness unknown"
-              : "no data yet"}
-          {stale && " · STALE"}
+              ? t((d) => d.panel.freshnessUnknown)
+              : t((d) => d.panel.noData)}
+          {stale && ` · ${t((d) => d.panel.stale)}`}
         </span>
       </header>
       {children}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as echarts from "echarts";
 import { Panel } from "./Panel";
 import { apiGet } from "../api/client";
+import { useLang } from "../i18n/LangContext";
 import type { Freshness, StockExposure } from "../api/types";
 
 /** Escape upstream strings before injecting into ECharts HTML tooltips. */
@@ -19,7 +20,9 @@ function escapeHtml(s: string): string {
  * Mandatory copy: holdings snapshot, NOT a fund flow. Weight changes
  * are mostly price moves. Never 主力/聪明钱.
  */
-export function ExposurePanel({ freshness }: { freshness: Freshness | null }) {  const [rows, setRows] = useState<StockExposure[] | null>(null);
+export function ExposurePanel({ freshness }: { freshness: Freshness | null }) {
+  const { t } = useLang();
+  const [rows, setRows] = useState<StockExposure[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
 
@@ -46,9 +49,13 @@ export function ExposurePanel({ freshness }: { freshness: Freshness | null }) { 
           const r = top[p.dataIndex];
           // Tickers come from an upstream file; escape before injecting
           // into the HTML tooltip string (red-team M3).
-          const t = escapeHtml(r.ticker);
+          const ticker = escapeHtml(r.ticker);
           const etfs = r.contributing_etfs.map(escapeHtml).join(", ");
-          return `${t}<br/>权重 ${(r.total_weight * 100).toFixed(2)}%<br/>${r.etf_count} 只板块ETF: ${etfs}`;
+          const weight = t((d) => d.m2.tooltipWeight, {
+            w: `${(r.total_weight * 100).toFixed(2)}%`,
+          });
+          const etfLine = `${t((d) => d.m2.tooltipEtfs, { n: r.etf_count })}: ${etfs}`;
+          return `${ticker}<br/>${weight}<br/>${etfLine}`;
         },
       },
       series: [
@@ -65,22 +72,24 @@ export function ExposurePanel({ freshness }: { freshness: Freshness | null }) { 
       window.removeEventListener("resize", onResize);
       chart.dispose();
     };
-  }, [rows]);
+  }, [rows, t]);
 
   return (
     <Panel
-      title="持仓敞口快照"
+      title={t((d) => d.m2.title)}
       module="m2"
       freshness={freshness}
       hasData={rows !== null && rows.length > 0}
     >
       <p style={{ fontSize: 12, color: "#888", margin: "0 0 12px" }}>
-        SSGA 官方日持仓 → 个股跨板块权重汇总。持仓快照，非资金流；权重日变化主要来自价格波动。
+        {t((d) => d.m2.desc)}
       </p>
-      {error && <p style={{ color: "#c00" }}>加载失败：{error}</p>}
-      {!error && !rows && <p style={{ color: "#999" }}>加载中…</p>}
+      {error && (
+        <p style={{ color: "#c00" }}>{t((d) => d.common.loadFailed, { error })}</p>
+      )}
+      {!error && !rows && <p style={{ color: "#999" }}>{t((d) => d.common.loading)}</p>}
       {!error && rows && rows.length === 0 && (
-        <p style={{ color: "#999" }}>暂无数据（等待每日 pipeline 运行）</p>
+        <p style={{ color: "#999" }}>{t((d) => d.m2.noData)}</p>
       )}
       <div ref={chartRef} style={{ height: 420 }} />
     </Panel>
