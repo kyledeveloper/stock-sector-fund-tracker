@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Panel } from "./components/Panel";
 import { ExposurePanel } from "./components/ExposurePanel";
+import { Form4Panel } from "./components/Form4Panel";
 import { MomentumPanel } from "./components/MomentumPanel";
 import { ThirteenFPanel } from "./components/ThirteenFPanel";
 import { LangToggle, useLang } from "./i18n/LangContext";
@@ -41,6 +42,7 @@ export function App() {
         <ExposurePanel freshness={fresh["m2"] ?? null} />
         <MomentumPanel freshness={fresh["m3"] ?? null} />
         <ThirteenFPanel freshness={fresh["m4"] ?? null} />
+        <Form4Panel freshness={fresh["m4"] ?? null} />
         {MODULES.map((m) => (
           <Panel
             key={m.key}

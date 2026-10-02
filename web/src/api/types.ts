@@ -71,6 +71,22 @@ export interface ManagerPositionsView {
   positions: ThirteenFPositionView[]; // top-N by value
   exited_count: number;
   new_count: number;
+  has_previous_quarter: boolean; // false -> "new" = first quarter on file
+}
+
+export interface InsiderBuyView {
+  ticker: string;
+  issuer: string;
+  insider: string;
+  officer_title: string;
+  filed_at: string;
+  transaction_date: string;
+  shares: number;
+  price: number | null;
+  value_usd: number | null;
+  is_10b5_1: boolean;
+  is_amendment: boolean;
+  is_joint_filing: boolean;
 }
 
 export interface Freshness {

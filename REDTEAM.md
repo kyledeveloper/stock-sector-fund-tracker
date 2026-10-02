@@ -154,3 +154,64 @@ EOD 数据源：用户决策（2026-10-01）**先用 Yahoo**（chart API，adj c
 - 真实数据冒烟（2026-10-01）：12 ticker × 126 bars → 1512 bars 入库，11 板块动量（XLK 领涨 +7.77%/+6.43%，XLE 走弱），幂等重跑 OK。
 
 最终：68 tests passed，ruff check + format clean，React 构建通过（ECharts chunk > 500kB 告警延续 Phase 1，defer）。
+
+---
+
+# Phase 3 红队：M4（13F-HR + Form 4）—— 2026-10-02
+
+红队：独立子代理（未参与实现），全部 finding 均有可运行 PoC（MockTransport + SQLite 真实入库，未碰 live SEC）。
+审查人：独立红队子代理 → 蓝队修复 → 复验通过 → 本文件为最终记录。
+
+## 总 verdict：NO-GO → 修复后 GO
+
+1 个 BLOCKER（静默数据损坏，污染面板核心金额指标）+ 7 个 MAJOR 已全部修复并加回归测试；
+8 个 MINOR 中 6 个已修复、1 个转 VPS 验证清单、导航文案改中性词。
+
+## 🔴 Blocker（已修复）
+
+| # | 问题 | 修复 | 验证 |
+|---|------|------|------|
+| B1 | `migrations/005_m4.sql`：`form4_transaction` PK = `(accession, date, code, shares)` 不含价格/行号；同一 filing 内两笔同股数不同价格的买入（如 500股@$50.10 + 500股@$50.25）第二笔被 `DO NOTHING` 静默吃掉，入库金额 $25,050 vs 真实 $50,175；且 `stats["buys"]` 按解析计数（记 2）与 DB（1）自相矛盾 | `migrations/006_m4_redteam.sql`：重建表，新 PK = `(accession_number, ordinal)`（filing 内 0-based 行号，解析时确定性分配）；`upsert_filing` 返回实际插入行数，service 用 `assert inserted == len(transactions)` 做 B1 回归门 | `test_b1_two_lots_same_shares_both_stored`：两笔 500股不同价 → 全部入库，buys=2，总金额 $50,175；006 在 005 旧库上受控验证：增量应用、数据保留、行号重排 |
+
+## 🟡 Major（已修复 7/7）
+
+| # | 问题 | 修复 | 验证 |
+|---|------|------|------|
+| M1 | `services/m4.py::run_form4`：循环内任一 filing 抛错（malformed XML、缺 ticker、偶发 403）→ 整个全市场扫描中断，freshness 永不标记；3 天 trailing window 使毒 filing 每天准时复现，约 4 天数据黑洞 | 单 filing try/except 隔离 → `stats["errors"]` 记录后继续；freshness 照常标记（带错的部分扫描 > 静默黑洞） | `test_m1_poison_filing_does_not_kill_scan`：3 filing 中间 malformed → fetched=2、errors=1、freshness 照常标记为 2026-10-01 |
+| M2 | 4/A 修正案 accession 与原 filing 不同 → `has_accession` 拦不住 → 同一笔买入原值+修正值双行入库，面板双计 | EFTS `_source.form` 存入 `form4_filing.form_type`（006 新增列）；`InsiderBuyView.is_amendment`；面板 “修正” 徽标 + 文案披露“更正后的金额可能以单独行出现”（v1 不自动 supersede：XML/EFTS 均无可靠的原 accession 链接，自动压制可能静默删除真实交易） | `test_m2_amendment_flagged_not_double_counted_silently`：form=4/A → 视图 is_amendment=True |
+| M3 | `parse_form4` 只取第一个 `reportingOwner`：联合申报（配偶/共同受托人常见）被错误归因，且当第一 owner 非高管时整笔真实高管买入在 `is_officer OR is_director` 过滤下静默消失 | 解析全部 owners：`insider` 为全名拼接，`is_joint_filing` 标记，officer/director/10% flags 跨 owner 取 OR（006 新增列）；面板 “联合申报” 标识 | `test_m3_joint_filers_no_silent_exclusion`：trust（非高管）+ CFO 联合 → flags 全 true，buy 正常入库，视图 is_joint_filing=True |
+| M4 | 首季入库后所有持仓打绿 “新建仓” 徽标，UI 无任何提示 → 用户误读为“本季度刚建仓” | `ManagerPositionsView.has_previous_quarter`；面板在首季显示黄色提示条 + 中英 `firstQuarterNote` 文案 | `test_first_quarter_flagged_for_honest_badges`：单季 → 全 False；`test_run_13f_new_quarter_refetches`：两季 → True |
+| M5 | cover-only 的 13F-HR/A 成为最新 filing → `_pick_infotable_doc` 找不到 infotable → 该经理永久拉取失败；且旧 `run_13f` all-or-nothing 拖住其余 11 家，无恢复路径 | 两层：① `run_13f` 单经理 try/except 隔离（errors 记录，不 block 其余）；② `fetch_13f_holdings` 对 `_NoInfotableDoc`（cover-only）在**同报告期**内向前回退到 base 13F-HR（`recent_13f_refs`）；真正的 ambiguous 仍 fail-loud | `test_cover_only_amendment_falls_back_to_base_filing`：最新 /A 无 infotable → 取同季 base，8 行入库；`test_one_manager_failure_isolated`：Berkshire 404 → 其余 11 家正常，errors 记录 1 条 |
+| M6 | 2000 上限在**任何入库前**熔断：财报季后交易窗口超量 → 当天零数据（恰是内幕数据最有价值时面板为空） | 软/硬双层：>2000 只记 `volume_warning` 并大声 echo，扫描继续；>10000 才 fail-loud（真漂移） | `test_run_form4_volume_soft_warn_and_hard_cap`：2001 → warning=True 且 2001 全部入库；10001 → “hard cap” ValueError |
+| M7 | 测试缺口：mock 忽略 EFTS `from` 参数 → 分页循环只走过单页；另发现 `hits.total` 缺失时静默截断（250→100，无报错） | mock 按 `from`/`size` 切片 + 调用计数；`search_form4` 对缺失 `hits.total` fail-loud | `test_m7_search_form4_paginates_and_missing_total_fails_loud`：250 hits → 3 次 EFTS 调用全量返回；缺 total → ValueError |
+
+## 🟢 Minor（已修复 6 / 转验证 1 / 改文案 1）
+
+| # | 问题 | 处理 |
+|---|------|------|
+| 1 | 面板文案 “按金额排序” 与 SQL `ORDER BY date DESC, value DESC` 矛盾 | 文案改为 “按时间倒序，同日内按金额排序” / “newest first, ranked by value within each day”（中英一致） |
+| 2 | `sshPrnamtType` 被忽略：PRN（债券本金）行的数字会显示在 “股数” 列 | `parse_13f_infotable` 对非 SH 的 `sshPrnamtType` fail-loud（`test_parse_13f_prn_amt_type_fails_loud`）；fixture 全 SH 不受影响 |
+| 3 | `q=%224%22` 脆弱性 + 未验证 `forms=4` 是否含 4/A | **转 VPS 验证清单**：沙盒 SEC 403 无法验证；在 VPS 上做一次去 `q` 的计数对比 + 确认 4/A 覆盖（见下） |
+| 4 | 导航 “聪明钱 / Smart Money”——用户曾禁用该标签（M2 语境） | 改为中性 “机构与内幕（13F / Form 4）” / “Institutions & Insiders (13F / Form 4)”（用户可再改） |
+| 5 | Form4Panel 不展示披露日，用户无法感知 ~2 天滞后 | 新增 “披露日 / Filed” 列（`filed_at` 已入库） |
+| 6 | 面板未声明 “仅非衍生品交易” | `f4Desc` 补充 “仅含非衍生品交易” / “Non-derivative transactions only” |
+| 7 | `is_10b5_1` 脚注误判：“NOT pursuant to a 10b5-1 plan” 被标为计划内 | `_is_10b5_1_plan`：10b5-1 前 40 字符内有 not/no 否定 → 不标记（`test_10b5_1_negation_not_flagged` 正反例） |
+| 8 | `stats["window"]` 只记起点 | 改为 `"{start}..{end}"` |
+
+## ✅ 红队验证通过项（抽样证据）
+
+- 13F `<value>` 单位：fixture 实证（LULU 100,000 股 × $177.93 = $17,793,000 精确吻合）→ EDGAR 13F XML 的 value 是整美元，代码不 ×1000 正确。
+- `fetch_form4_xml` 的 CIK fallback 有效（`PoliteClient` 对 404 抛 `HTTPStatusError`；URL 含全局唯一 accession，无错取文件可能）。
+- S-sell 混入买入视图：`recent_open_market_buys` 只选 `is_open_market_buy=1`，无混淆。
+- 首季 “new” 徽标：`diff_13f` 的 prev 为空逻辑保留（开发者可见 docstring），用户侧由面板提示条承接。
+- 架构测试通过；拆分后 `ingest/edgar.py` 207 行 / `edgar_form4.py` 148 行，均在 ~300 行预算内；同包导入经分层测试允许。
+- i18n：新增 6 个 key（f4ColFiled / f4Amendment / f4Joint / firstQuarterNote 等）中英齐备，TS type-lock 编译通过。
+
+## ⚠️ VPS 上线前验证清单（沙盒 403，无法在此验证）
+
+1. EFTS 去 `q` 对比：`forms=4` 单独查询的计数 ≈ 带 `q=%224%22` 的计数（排除静默遗漏）。
+2. 确认 `forms=4` 返回 4/A（若不含，M2 的修正案场景变为 “修正案直接漏掉”——另一种静默问题）。
+3. `backfill-m4` 全量：12 家 13F + 7 天 Form 4（约 4000 filings，~35min），观察 `volume_warning` 与 `errors`。
+4. 真实数据冒烟（2026-10-01 曾验证 EFTS 模式：2 天 1119 hits，分页 `size=100`）。
+
+最终：110 tests passed，ruff check + format clean，React 构建通过（含新增徽标/列/提示条）。

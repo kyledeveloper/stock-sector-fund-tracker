@@ -100,6 +100,20 @@ export function ThirteenFPanel({ freshness }: { freshness: Freshness | null }) {
             {t((d) => d.m4.reportDate)} {mgr.report_date} ·{" "}
             {t((d) => d.m4.filedAt)} {mgr.filed_at}
           </p>
+          {!mgr.has_previous_quarter && (
+            <p
+              style={{
+                fontSize: 12,
+                color: "#8a6d1b",
+                background: "#fef6e0",
+                borderRadius: 4,
+                padding: "6px 10px",
+                margin: "0 0 8px",
+              }}
+            >
+              {t((d) => d.m4.firstQuarterNote)}
+            </p>
+          )}
           <table
             style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}
           >

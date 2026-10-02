@@ -1,8 +1,8 @@
-"""SEC EDGAR ingest: 13F-HR holdings + Form 4 insider transactions (M4).
+"""SEC EDGAR 13F-HR ingest (M4).
 
 Fair access: every request goes through PoliteClient (0.5s pacing, well
-under SEC's 10 req/s cap; descriptive UA with contact). 13F-HR pipeline
-per manager: submissions JSON -> verify CIK/name -> newest 13F-HR ref ->
+under SEC's 10 req/s cap; descriptive UA with contact). Pipeline per
+manager: submissions JSON -> verify CIK/name -> newest 13F-HR ref ->
 filing index -> information-table XML -> parse.
 
 Note: this sandbox's egress gets SEC 403 (confirmed 2026-10-01); the
@@ -12,11 +12,10 @@ the user's VPS, where the fixtures here were captured from.
 Scope (red-team F4, Phase 0): a fixed manager watchlist (M4_WATCHLIST in
 models.py, user-approved 2026-10-01), NOT "all filers".
 
-v1 limitations (documented, not silent):
-- 13F XML carries CUSIP + issuer name but NO ticker. No synthetic
-  CUSIP->ticker mapping in v1 (that would be fabricated data); the panel
-  shows issuer names. Mapping is a Phase 4+ enhancement.
-- Form 4: non-derivative transactions only; derivativeTable ignored.
+v1 limitation (documented, not silent): 13F XML carries CUSIP + issuer
+name but NO ticker. No synthetic CUSIP->ticker mapping in v1 (that would
+be fabricated data); the panel shows issuer names. Mapping is a Phase 4+
+enhancement. (Form 4 lives in edgar_form4.py.)
 """
 
 from __future__ import annotations
@@ -26,12 +25,7 @@ import xml.etree.ElementTree as ET
 from datetime import date
 
 from moneyflow.common.http import DEFAULT_MIN_INTERVAL_S, DEFAULT_UA, PoliteClient
-from moneyflow.models import (
-    Form4Filing,
-    InsiderTransaction,
-    ThirteenFFilingRef,
-    ThirteenFHolding,
-)
+from moneyflow.models import ThirteenFFilingRef, ThirteenFHolding
 
 USER_AGENT = DEFAULT_UA
 MIN_INTERVAL_S = DEFAULT_MIN_INTERVAL_S
@@ -65,11 +59,12 @@ def _parse_date(s: str) -> date:
 # ---------------------------------------------------------------------------
 
 
-def latest_13f_hr(submissions: dict) -> ThirteenFFilingRef:
-    """Newest 13F-HR by reportDate (filingDate breaks ties).
+def recent_13f_refs(submissions: dict, limit: int = 5) -> list[ThirteenFFilingRef]:
+    """Newest-first 13F-HR/13F-HR/A refs from a submissions JSON.
 
-    13F-HR/A amendments count: a later amendment supersedes the original
-    for its quarter. Index-aligned arrays; length drift fails loud.
+    M5: when the newest filing is a cover-only amendment (no info table),
+    the fetcher walks this list for the same quarter's base filing instead
+    of deadlocking the manager forever.
     """
     recent = (submissions.get("filings") or {}).get("recent") or {}
     forms = recent.get("form") or []
@@ -83,15 +78,27 @@ def latest_13f_hr(submissions: dict) -> ThirteenFFilingRef:
     for i, form in enumerate(forms):
         if form in ("13F-HR", "13F-HR/A"):
             cands.append((rdates[i], fdates[i], accs[i]))
-    if not cands:
-        raise ValueError("EDGAR: no 13F-HR filing in submissions")
     cands.sort(reverse=True)  # newest reportDate, then newest filingDate
-    rdate, fdate, acc = cands[0]
-    return ThirteenFFilingRef(
-        accession_number=acc,
-        filing_date=_parse_date(fdate),
-        report_date=_parse_date(rdate),
-    )
+    return [
+        ThirteenFFilingRef(
+            accession_number=acc,
+            filing_date=_parse_date(fdate),
+            report_date=_parse_date(rdate),
+        )
+        for rdate, fdate, acc in cands[:limit]
+    ]
+
+
+def latest_13f_hr(submissions: dict) -> ThirteenFFilingRef:
+    """Newest 13F-HR by reportDate (filingDate breaks ties).
+
+    13F-HR/A amendments count: a later amendment supersedes the original
+    for its quarter. Index-aligned arrays; length drift fails loud.
+    """
+    refs = recent_13f_refs(submissions, limit=1)
+    if not refs:
+        raise ValueError("EDGAR: no 13F-HR filing in submissions")
+    return refs[0]
 
 
 def verify_filer_name(submissions: dict, expected: str) -> None:
@@ -129,6 +136,14 @@ def parse_13f_infotable(
     out: list[ThirteenFHolding] = []
     for row in rows:
         amt = row.find("shrsOrPrnAmt")
+        # MINOR-2: sshPrnamtType "PRN" means the number is a dollar principal
+        # (bond-like), not a share count. Showing it under "shares" would be
+        # wrong data; fail loud until PRN rows get their own handling.
+        amt_type = _text(amt, "sshPrnamtType")
+        if amt_type and amt_type != "SH":
+            raise ValueError(
+                f"EDGAR: unsupported shrsOrPrnAmt type '{amt_type}' (need PRN handling)"
+            )
         out.append(
             ThirteenFHolding(
                 report_date=report_date,
@@ -144,6 +159,12 @@ def parse_13f_infotable(
             )
         )
     return out
+
+
+class _NoInfotableDoc(ValueError):
+    """The filing index has no information-table document (e.g. a cover-only
+    13F-HR/A). Subclass of ValueError so existing fail-loud tests still hold;
+    the fetcher catches this specifically to try the same quarter's base filing."""
 
 
 def _pick_infotable_doc(index_json: dict) -> str:
@@ -162,6 +183,10 @@ def _pick_infotable_doc(index_json: dict) -> str:
         return preferred[0]
     if not preferred and len(non_primary) == 1:
         return non_primary[0]
+    if not non_primary:
+        # M5: cover-only amendment -- no info table to pick. The fetcher
+        # falls back to the same quarter's base filing; this is NOT ambiguity.
+        raise _NoInfotableDoc("EDGAR: filing index has no information-table document")
     raise ValueError(f"EDGAR: ambiguous info-table candidates: {docs}")
 
 
@@ -185,89 +210,44 @@ def fetch_13f_holdings(
     expected_name: str,
     client: PoliteClient | None = None,
 ) -> list[ThirteenFHolding]:
-    """Full 13F-HR pull for one manager (submissions -> index -> XML -> parse)."""
+    """Full 13F-HR pull for one manager (submissions -> index -> XML -> parse).
+
+    M5: if the newest filing is a cover-only 13F-HR/A (no info table), walk
+    back through the same quarter's filings for the base 13F-HR instead of
+    raising -- a loud permanent failure for a routine amendment otherwise.
+    """
     cik10 = cik.strip().zfill(10)
     own = client is None
     client = client or PoliteClient()
     try:
         sub = client.get(_SUBMISSIONS.format(cik=cik10)).json()
         verify_filer_name(sub, expected_name)
-        ref = latest_13f_hr(sub)
-        acc_nodash = ref.accession_number.replace("-", "")
-        index = client.get(_ARCHIVES.format(cik=int(cik10), acc=acc_nodash)).json()
-        doc = _pick_infotable_doc(index)
-        xml = client.get(
-            f"https://www.sec.gov/Archives/edgar/data/{int(cik10)}/{acc_nodash}/{doc}"
-        ).content
-        return parse_13f_infotable(
-            xml,
-            cik=cik10,
-            filer_name=(sub.get("name") or "").strip(),
-            report_date=ref.report_date,
-            filed_at=ref.filing_date,
-        )
+        refs = recent_13f_refs(sub, limit=5)
+        if not refs:
+            raise ValueError("EDGAR: no 13F-HR filing in submissions")
+        same_quarter = [r for r in refs if r.report_date == refs[0].report_date]
+        last_err: _NoInfotableDoc | None = None
+        for ref in same_quarter:
+            acc_nodash = ref.accession_number.replace("-", "")
+            index = client.get(_ARCHIVES.format(cik=int(cik10), acc=acc_nodash)).json()
+            try:
+                doc = _pick_infotable_doc(index)
+            except _NoInfotableDoc as e:
+                last_err = e
+                continue  # cover-only amendment: try the previous filing
+            xml = client.get(
+                f"https://www.sec.gov/Archives/edgar/data/{int(cik10)}/{acc_nodash}/{doc}"
+            ).content
+            return parse_13f_infotable(
+                xml,
+                cik=cik10,
+                filer_name=(sub.get("name") or "").strip(),
+                report_date=ref.report_date,
+                filed_at=ref.filing_date,
+            )
+        raise ValueError(
+            f"EDGAR: no filing with an info table for quarter {refs[0].report_date}"
+        ) from last_err
     finally:
         if own:
             client.close()
-
-
-# ---------------------------------------------------------------------------
-# Form 4 ownership-document XML (non-derivative transactions only, v1)
-# ---------------------------------------------------------------------------
-
-
-def parse_form4(xml: bytes, *, accession_number: str = "") -> Form4Filing:
-    try:
-        root = _strip_ns(ET.fromstring(xml))
-    except ET.ParseError as e:
-        raise ValueError(f"EDGAR: unparseable Form 4: {e}") from e
-
-    ticker = _text(root, "issuer/issuerTradingSymbol", required=True)
-    owner = root.find("reportingOwner")
-    rel = owner.find("reportingOwnerRelationship") if owner is not None else None
-    footnotes = {
-        (fn.get("id") or ""): "".join(fn.itertext()).strip() for fn in root.findall(".//footnote")
-    }
-
-    def flag(path: str) -> bool:
-        return _text(rel, path).lower() == "true"
-
-    txs: list[InsiderTransaction] = []
-    for node in root.findall(".//nonDerivativeTransaction"):
-        code = _text(node, "transactionCoding/transactionCode")
-        ad = _text(node, "transactionAmounts/transactionAcquiredDisposedCode/value")
-        shares = int(_text(node, "transactionAmounts/transactionShares/value", required=True))
-        price_raw = _text(node, "transactionAmounts/transactionPricePerShare/value")
-        price = float(price_raw) if price_raw else None
-        footnote_text = " ".join(
-            footnotes.get((fid.get("id") or ""), "") for fid in node.findall(".//footnoteId")
-        )
-        txs.append(
-            InsiderTransaction(
-                transaction_date=_parse_date(_text(node, "transactionDate/value", required=True)),
-                transaction_code=code,
-                acquired_disposed=ad,
-                shares=shares,
-                price=price,
-                value_usd=shares * price if price is not None else None,
-                side="buy" if ad == "A" else "sell",
-                is_open_market_buy=(code == "P" and ad == "A"),
-                is_10b5_1=(_text(root, "aff10b5One") == "1" or "10b5-1" in footnote_text.lower()),
-            )
-        )
-
-    owner_id = owner.find("reportingOwnerId") if owner is not None else None
-    return Form4Filing(
-        ticker=ticker,
-        issuer=_text(root, "issuer/issuerName"),
-        issuer_cik=_text(root, "issuer/issuerCik"),
-        insider=_text(owner_id, "rptOwnerName"),
-        insider_cik=_text(owner_id, "rptOwnerCik"),
-        officer_title=_text(rel, "officerTitle"),
-        is_officer=flag("isOfficer"),
-        is_director=flag("isDirector"),
-        is_ten_percent_owner=flag("isTenPercentOwner"),
-        filed_at=_parse_date(_text(root, "ownerSignature/signatureDate", required=True)),
-        accession_number=accession_number,
-        transactions=txs,
-    )

@@ -9,7 +9,7 @@ fixtures stay 100% real.
 
 from pathlib import Path
 
-from moneyflow.ingest.edgar import parse_form4
+from moneyflow.ingest.edgar_form4 import parse_form4
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "edgar" / "form4_samsara.xml"
 

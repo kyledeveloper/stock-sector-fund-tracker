@@ -43,13 +43,15 @@ def run_all(engine=None) -> dict:
         return {"skipped": True, "today": today}
     m2_result = m2_service.run_m2(engine)
     m3_result = m3_service.run_m3(engine)
-    m4_result = m4_service.run_13f(engine)
+    m4_13f_result = m4_service.run_13f(engine)
+    m4_f4_result = m4_service.run_form4(engine)
     return {
         "skipped": False,
         "today": today,
         "m2": m2_result,
         "m3": m3_result,
-        "m4": m4_result,
+        "m4_13f": m4_13f_result,
+        "m4_form4": m4_f4_result,
     }
 
 
@@ -100,31 +102,50 @@ def m4() -> None:
     """M4: EDGAR 13F-HR (12-manager watchlist, quarterly) + Form 4 scan.
 
     13F is quarterly: the daily run only re-fetches a manager when a new
-    quarter appears (12 cheap submissions checks). Form 4 runs its daily
-    scan once implemented (currently: 13F side only).
+    quarter appears (12 cheap submissions checks). Form 4 scans the
+    trailing 3 days market-wide (covers the weekend gap on Mondays).
     """
     today = today_et()
     if not is_trading_day(today):
         typer.echo(f"{today}: not a trading day, m4 skipped (same gate as run-all).")
         return
-    result = m4_service.run_13f(_engine())
+    r13f = m4_service.run_13f(_engine())
+    rf4 = m4_service.run_form4(_engine())
     typer.echo(
-        f"m4 done: {result['checked']} managers checked, "
-        f"{result['fetched']} new quarters, {result['holdings']} holdings."
+        f"m4 done: 13f {r13f['checked']} managers checked, "
+        f"{r13f['fetched']} new quarters; "
+        f"form4 {rf4['scanned']} filings scanned, {rf4['fetched']} new, "
+        f"{rf4['buys']} insider buys."
     )
+    for e in r13f["errors"]:
+        typer.echo(f"  13F ERROR {e['manager']}: {e['error']}")
+    for e in rf4["errors"]:
+        typer.echo(f"  Form4 ERROR {e['adsh']}: {e['error']}")
+    if rf4["volume_warning"]:
+        typer.echo(
+            f"  Form4 VOLUME WARNING: {rf4['scanned']} filings -- review whether"
+            " this is a real volume spike or upstream drift."
+        )
 
 
 @app.command(name="backfill-m4")
 def backfill_m4() -> None:
-    """M4 backfill: full 13F-HR pull for all 12 watchlist managers.
+    """M4 backfill: full 13F-HR pull for all 12 watchlist managers +
+    Form 4 scan over the trailing 7 days (one-off).
 
-    One-off before the first daily run. Idempotent by upsert; safe to
-    re-run. The first stored quarter shows all positions as "new"; the
-    QoQ diff activates when the next quarter is filed.
+    Idempotent by upsert/accession; safe to re-run. The first stored 13F
+    quarter shows all positions as "new"; the QoQ diff activates when the
+    next quarter is filed.
     NOTE: live EDGAR pull -- needs non-403 egress (the user's VPS).
     """
-    result = m4_service.run_13f(_engine())
-    typer.echo(f"m4 backfill done: {result['fetched']} managers, {result['holdings']} holdings.")
+    engine = _engine()
+    r13f = m4_service.run_13f(engine)
+    rf4 = m4_service.run_form4(engine, days=7)
+    typer.echo(
+        f"m4 backfill done: 13f {r13f['fetched']} managers, "
+        f"{r13f['holdings']} holdings; form4 {rf4['fetched']} filings, "
+        f"{rf4['buys']} insider buys."
+    )
 
 
 @app.command()
@@ -141,8 +162,10 @@ def run_all_cmd() -> None:
         typer.echo(
             f"{result['today']}: m2 ok ({result['m2']['exposures']} exposures), "
             f"m3 ok ({result['m3']['sectors']} sectors), "
-            f"m4 ok ({result['m4']['checked']} managers checked, "
-            f"{result['m4']['fetched']} new quarters)."
+            f"m4 ok (13f: {result['m4_13f']['checked']} checked / "
+            f"{result['m4_13f']['fetched']} new quarters; "
+            f"form4: {result['m4_form4']['fetched']} new filings, "
+            f"{result['m4_form4']['buys']} buys)."
         )
 
 

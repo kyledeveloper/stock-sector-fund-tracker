@@ -289,18 +289,23 @@ class Form4Repository:
     def __init__(self, session) -> None:
         self._s = session
 
-    def upsert_filing(self, filing: Form4Filing) -> None:
+    def upsert_filing(self, filing: Form4Filing) -> int:
+        """Upsert one filing + its transactions. Returns the number of
+        transaction rows actually inserted (B1: with the ordinal PK there
+        are no silent drops; the service cross-checks this count)."""
         self._s.execute(
             text(
                 "INSERT INTO form4_filing (accession_number, ticker, issuer,"
-                " insider, officer_title, is_officer, is_director, filed_at)"
+                " insider, officer_title, is_officer, is_director, filed_at,"
+                " form_type, is_joint_filing)"
                 " VALUES (:acc, :ticker, :issuer, :insider, :title,"
-                " :officer, :director, :filed_at)"
+                " :officer, :director, :filed_at, :form_type, :joint)"
                 " ON CONFLICT (accession_number) DO UPDATE SET"
                 " ticker=excluded.ticker, issuer=excluded.issuer,"
                 " insider=excluded.insider, officer_title=excluded.officer_title,"
                 " is_officer=excluded.is_officer, is_director=excluded.is_director,"
-                " filed_at=excluded.filed_at"
+                " filed_at=excluded.filed_at, form_type=excluded.form_type,"
+                " is_joint_filing=excluded.is_joint_filing"
             ),
             {
                 "acc": filing.accession_number,
@@ -311,21 +316,24 @@ class Form4Repository:
                 "officer": int(filing.is_officer),
                 "director": int(filing.is_director),
                 "filed_at": _iso(filing.filed_at),
+                "form_type": filing.form_type,
+                "joint": int(filing.is_joint_filing),
             },
         )
+        inserted = 0
         for t in filing.transactions:
-            self._s.execute(
+            res = self._s.execute(
                 text(
-                    "INSERT INTO form4_transaction (accession_number,"
+                    "INSERT INTO form4_transaction (accession_number, ordinal,"
                     " transaction_date, transaction_code, shares, price,"
                     " value_usd, side, is_open_market_buy, is_10b5_1)"
-                    " VALUES (:acc, :tdate, :code, :shares, :price,"
+                    " VALUES (:acc, :ordinal, :tdate, :code, :shares, :price,"
                     " :value_usd, :side, :omb, :plan)"
-                    " ON CONFLICT (accession_number, transaction_date,"
-                    " transaction_code, shares) DO NOTHING"
+                    " ON CONFLICT (accession_number, ordinal) DO NOTHING"
                 ),
                 {
                     "acc": filing.accession_number,
+                    "ordinal": t.ordinal,
                     "tdate": _iso(t.transaction_date),
                     "code": t.transaction_code,
                     "shares": t.shares,
@@ -336,7 +344,9 @@ class Form4Repository:
                     "plan": int(t.is_10b5_1),
                 },
             )
+            inserted += res.rowcount or 0
         self._s.commit()
+        return inserted
 
     def has_accession(self, accession_number: str) -> bool:
         return (
@@ -353,7 +363,7 @@ class Form4Repository:
             text(
                 "SELECT f.ticker, f.issuer, f.insider, f.officer_title,"
                 " f.filed_at, t.transaction_date, t.shares, t.price,"
-                " t.value_usd, t.is_10b5_1"
+                " t.value_usd, t.is_10b5_1, f.form_type, f.is_joint_filing"
                 " FROM form4_transaction t JOIN form4_filing f"
                 " ON f.accession_number = t.accession_number"
                 " WHERE t.is_open_market_buy = 1"
@@ -375,6 +385,8 @@ class Form4Repository:
                 "price": r[7],
                 "value_usd": r[8],
                 "is_10b5_1": bool(r[9]),
+                "is_amendment": (r[10] or "4") == "4/A",
+                "is_joint_filing": bool(r[11]),
             }
             for r in rows
         ]

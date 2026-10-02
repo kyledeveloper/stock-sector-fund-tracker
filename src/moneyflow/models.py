@@ -178,6 +178,7 @@ class ThirteenFPositionView(BaseModel):
 class InsiderTransaction(BaseModel):
     """One Form 4 non-derivative transaction."""
 
+    ordinal: int = 0  # 0-based row index within the filing (B1: part of the PK)
     transaction_date: date
     transaction_code: str  # P = open-market purchase, S = sale, ...
     acquired_disposed: str  # "A" | "D"
@@ -197,12 +198,14 @@ class Form4Filing(BaseModel):
     issuer_cik: str = ""
     insider: str = ""
     insider_cik: str = ""
-    officer_title: str = ""
-    is_officer: bool = False
-    is_director: bool = False
+    is_joint_filing: bool = False  # M3: >1 reportingOwner; insider holds all names
+    officer_title: str = ""  # primary owner's title
+    is_officer: bool = False  # OR across joint filers (M3: no silent exclusion)
+    is_director: bool = False  # OR across joint filers
     is_ten_percent_owner: bool = False
     filed_at: date
     accession_number: str = ""
+    form_type: str = "4"  # "4" | "4/A" (M2: amendments flagged, not auto-superseded)
     transactions: list[InsiderTransaction] = []
 
 
@@ -219,6 +222,9 @@ class InsiderBuyView(BaseModel):
     price: float | None = None
     value_usd: float | None = None
     is_10b5_1: bool = False
+    is_amendment: bool = False  # M2: from a 4/A filing; corrected values may
+    # appear as separate rows (v1 flags, does not auto-supersede)
+    is_joint_filing: bool = False  # M3
 
 
 class ManagerPositionsView(BaseModel):
@@ -231,6 +237,8 @@ class ManagerPositionsView(BaseModel):
     positions: list[ThirteenFPositionView]  # top-N current positions by value
     exited_count: int = 0
     new_count: int = 0
+    has_previous_quarter: bool = False  # M4: False -> "new" badges mean
+    # "first quarter on file", not "newly opened this quarter"
 
 
 # M4 13F watchlist: (display name, CIK). Approved by the user 2026-10-01

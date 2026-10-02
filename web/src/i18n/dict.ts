@@ -13,7 +13,7 @@ export const zh = {
     phaseComing: "{phase} 建设中",
   },
   modules: {
-    m4: "聪明钱（13F / 内幕）",
+    m4: "机构与内幕（13F / Form 4）",
     m5: "期权情绪",
   },
   panel: {
@@ -74,6 +74,21 @@ export const zh = {
     optionLeg: "期权",
     noData:
       "暂无数据（先运行回填：python -m moneyflow.pipeline.daily backfill-m4）",
+    f4Title: "Form 4 内幕人买入",
+    f4Desc:
+      "高管 / 董事的公开市场买入（全市场每日扫描；按时间倒序，同日内按金额排序）。约 2 天披露滞后；10b5-1 计划内交易已标注——计划内买入通常信号较弱。仅含非衍生品交易；4/A 修正案已标注为“修正”，其更正后的金额可能以单独行出现。",
+    f4ColTicker: "代码",
+    f4ColInsider: "内幕人",
+    f4ColDate: "交易日",
+    f4ColFiled: "披露日",
+    f4ColShares: "股数",
+    f4ColPrice: "价格",
+    f4ColValue: "金额",
+    f4Plan: "10b5-1",
+    f4Amendment: "修正",
+    f4Joint: "联合申报",
+    firstQuarterNote:
+      "注意：这是该机构入库的首个季度，所有持仓都标记为“新建仓”；环比变化自下个季度起生效。",
   },
 };
 
@@ -86,7 +101,7 @@ export const en: Dict = {
     phaseComing: "Coming in {phase}",
   },
   modules: {
-    m4: "Smart Money (13F / Insider)",
+    m4: "Institutions & Insiders (13F / Form 4)",
     m5: "Options Sentiment",
   },
   panel: {
@@ -144,5 +159,20 @@ export const en: Dict = {
     optionLeg: "Option",
     noData:
       "No data yet (run the backfill first: python -m moneyflow.pipeline.daily backfill-m4)",
+    f4Title: "Form 4 Insider Buys",
+    f4Desc:
+      "Open-market buys by officers / directors (market-wide daily scan; newest first, ranked by value within each day). ~2-day disclosure lag; 10b5-1 plan trades are flagged -- in-plan buys are usually weaker signals. Non-derivative transactions only; 4/A amendments are flagged as amended, and their corrected values may appear as separate rows.",
+    f4ColTicker: "Ticker",
+    f4ColInsider: "Insider",
+    f4ColDate: "Trade date",
+    f4ColFiled: "Filed",
+    f4ColShares: "Shares",
+    f4ColPrice: "Price",
+    f4ColValue: "Value",
+    f4Plan: "10b5-1",
+    f4Amendment: "Amended",
+    f4Joint: "Joint filing",
+    firstQuarterNote:
+      "Note: this is the first quarter on file for this manager, so every position is badged “new”; quarter-over-quarter changes take effect from next quarter.",
   },
 };

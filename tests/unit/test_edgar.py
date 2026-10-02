@@ -29,6 +29,7 @@ from moneyflow.ingest.edgar import (
     _pick_infotable_doc,
     fetch_13f_holdings,
     latest_13f_hr,
+    parse_13f_infotable,
     verify_filer_name,
 )
 
@@ -145,3 +146,87 @@ def test_pick_infotable_doc_ambiguous():
 def test_pick_infotable_doc_no_xml():
     with pytest.raises(ValueError, match="no XML"):
         _pick_infotable_doc({"directory": {"item": [{"name": "a.txt"}]}})
+
+
+def test_cover_only_amendment_falls_back_to_base_filing():
+    """M5: newest filing is a cover-only 13F-HR/A (index has primary_doc.xml
+    only). The fetcher must use the same quarter's base filing instead of
+    raising -- previously a loud permanent per-manager deadlock."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "submissions/CIK" in url:
+            return httpx.Response(
+                200,
+                json={
+                    "name": "Scion Asset Management, LLC",
+                    "filings": {
+                        "recent": {
+                            "accessionNumber": [
+                                "0001649339-25-000007",  # cover-only /A (newest)
+                                "0001649339-25-000006",  # base 13F-HR, same quarter
+                            ],
+                            "filingDate": ["2025-11-03", "2025-08-14"],
+                            "form": ["13F-HR/A", "13F-HR"],
+                            "reportDate": ["2025-09-30", "2025-09-30"],
+                        }
+                    },
+                },
+            )
+        if url.endswith("index.json"):
+            if "000164933925000007" in url:  # the amendment: cover only
+                return httpx.Response(
+                    200, json={"directory": {"item": [{"name": "primary_doc.xml"}]}}
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "directory": {"item": [{"name": "primary_doc.xml"}, {"name": "infotable.xml"}]}
+                },
+            )
+        if url.endswith("infotable.xml"):
+            return httpx.Response(200, content=(_FIXDIR / "scion_infotable.xml").read_bytes())
+        return httpx.Response(404, text="not found")
+
+    client = PoliteClient(transport=httpx.MockTransport(handler), trust_env=False, min_interval_s=0)
+    holdings = fetch_13f_holdings("1649339", "Scion", client=client)
+    assert len(holdings) == 8  # base filing's info table, not an exception
+    assert str(holdings[0].report_date) == "2025-09-30"
+
+
+def test_pick_infotable_cover_only_raises_distinct_error():
+    """The cover-only case raises _NoInfotableDoc (a ValueError subclass):
+    the fetcher falls back on it, genuine ambiguity still fails loud."""
+    from moneyflow.ingest.edgar import _NoInfotableDoc
+
+    with pytest.raises(_NoInfotableDoc):
+        _pick_infotable_doc({"directory": {"item": [{"name": "primary_doc.xml"}]}})
+    with pytest.raises(ValueError, match="ambiguous"):
+        _pick_infotable_doc(
+            {
+                "directory": {
+                    "item": [
+                        {"name": "primary_doc.xml"},
+                        {"name": "a.xml"},
+                        {"name": "b.xml"},
+                    ]
+                }
+            }
+        )
+
+
+def test_parse_13f_prn_amt_type_fails_loud():
+    """MINOR-2: a PRN (principal amount) row must not masquerade as shares."""
+    xml = b"""<informationTable>
+<infoTable><nameOfIssuer>X</nameOfIssuer><cusip>000000000</cusip>
+<titleOfClass>COM</titleOfClass><value>1000</value>
+<shrsOrPrnAmt><sshPrnamt>500</sshPrnamt><sshPrnamtType>PRN</sshPrnamtType></shrsOrPrnAmt>
+</infoTable></informationTable>"""
+    with pytest.raises(ValueError, match="PRN"):
+        parse_13f_infotable(
+            xml,
+            cik="0000000001",
+            filer_name="X",
+            report_date=date(2026, 6, 30),
+            filed_at=date(2026, 8, 14),
+        )
