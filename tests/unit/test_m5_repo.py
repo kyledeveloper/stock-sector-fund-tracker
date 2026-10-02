@@ -41,7 +41,13 @@ def test_upsert_is_idempotent(repo):
     assert rows[0].total_put_call == pytest.approx(0.95)  # overwritten
 
 
-def test_series_orders_asc_and_respects_limit(repo):
+def test_series_returns_trailing_n_oldest_first(repo):
+    """series(N) must return the newest N rows (trailing window), oldest first.
+
+    The pre-redteam implementation returned the *oldest* N rows -- a panel
+    silently showing months-old data. This test pins the trailing-window
+    contract: with 3 rows and days=2, the 2026-09-28 row is dropped.
+    """
     for d, v in (
         (date(2026, 9, 30), 0.88),
         (date(2026, 9, 28), 0.90),
@@ -49,10 +55,17 @@ def test_series_orders_asc_and_respects_limit(repo):
     ):
         repo.upsert(_day(d, v))
     rows = repo.series(2)
-    assert [r.trade_date.isoformat() for r in rows] == ["2026-09-28", "2026-09-29"]
-    assert rows[0].total_put_call == pytest.approx(0.90)
+    assert [r.trade_date.isoformat() for r in rows] == ["2026-09-29", "2026-09-30"]
+    assert rows[0].total_put_call == pytest.approx(0.85)
     assert rows[0].source_url.startswith("https://www.cboe.com")
     assert rows[0].fetched_at is not None
+
+
+def test_series_limit_above_row_count_returns_all(repo):
+    for d, v in ((date(2026, 9, 29), 0.85), (date(2026, 9, 30), 0.88)):
+        repo.upsert(_day(d, v))
+    rows = repo.series(90)
+    assert [r.trade_date.isoformat() for r in rows] == ["2026-09-29", "2026-09-30"]
 
 
 def test_latest_returns_newest_or_none(repo):

@@ -137,3 +137,57 @@ def test_backfill_single_day_failure_does_not_abort(engine):
     assert result["fetched"] == trading_in_window - 1  # the rest still stored
     repo, _ = _repos(engine)
     assert len(repo.series(365)) == trading_in_window - 1
+
+
+def test_backfill_upsert_failure_isolated_and_recorded(engine, monkeypatch):
+    """A DB write failure on one day is recorded in errors; the backfill
+    continues with the remaining days (red-team M2)."""
+    from moneyflow.common.trading_day import last_trading_day_before
+
+    bad_day = last_trading_day_before(today_et())
+    real_upsert = m5_service.CboePutCallRepository.upsert
+
+    def flaky_upsert(self, day):
+        if day.trade_date == bad_day:
+            raise RuntimeError("transient SQLite lock")
+        return real_upsert(self, day)
+
+    monkeypatch.setattr(m5_service.CboePutCallRepository, "upsert", flaky_upsert)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=SAMPLE)
+
+    result = m5_service.run_backfill_m5(engine, days=3, client=_mock_client(handler))
+    assert len(result["errors"]) == 1
+    assert result["errors"][0]["trade_date"] == bad_day.isoformat()
+    assert "upsert RuntimeError" in result["errors"][0]["error"]
+    window = [today_et() - timedelta(days=b) for b in range(3)]
+    trading_in_window = sum(1 for d in window if is_trading_day(d))
+    assert result["fetched"] == trading_in_window - 1
+    repo, _ = _repos(engine)
+    stored = {r.trade_date for r in repo.series(365)}
+    assert bad_day not in stored
+    assert len(stored) == trading_in_window - 1
+
+
+def test_backfill_marks_freshness(engine):
+    """After backfill, the m5 freshness row reflects the latest fetched
+    date -- otherwise the panel grays out as 'unknown' (red-team M3)."""
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(200, text=SAMPLE)
+
+    result = m5_service.run_backfill_m5(engine, days=5, client=_mock_client(handler))
+    assert result["fetched"] >= 1
+    session = SessionLocal(bind=engine)
+    try:
+        rec = FreshnessRepository(session).all().get("m5")
+    finally:
+        session.close()
+    assert rec is not None
+    repo, _ = _repos(engine)
+    latest = max(r.trade_date for r in repo.series(365))
+    assert rec[0] == latest
+    assert rec[1] is not None  # checked_at bumped

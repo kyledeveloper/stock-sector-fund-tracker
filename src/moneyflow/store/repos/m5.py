@@ -44,11 +44,21 @@ class CboePutCallRepository:
         self._s.commit()
 
     def series(self, days: int) -> list[CboeDaily]:
+        """The trailing `days` rows, oldest first.
+
+        LIMIT on ASC order would return the *oldest* days rows -- wrong
+        once the table holds more rows than the window. The subquery
+        picks the newest `days` dates first, then orders them oldest-first
+        for the panel.
+        """
         rows = self._s.execute(
             text(
                 "SELECT trade_date, total_put_call, equity_put_call,"
                 " index_put_call, fetched_at, source_url"
-                " FROM cboe_putcall ORDER BY trade_date ASC LIMIT :days"
+                " FROM cboe_putcall WHERE trade_date IN ("
+                " SELECT trade_date FROM cboe_putcall"
+                " ORDER BY trade_date DESC LIMIT :days)"
+                " ORDER BY trade_date ASC"
             ),
             {"days": days},
         ).all()

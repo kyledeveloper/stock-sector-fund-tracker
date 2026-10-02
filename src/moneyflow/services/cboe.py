@@ -37,9 +37,13 @@ _SCOPES: tuple[tuple[str, str], ...] = (
 #: Values that mean "no quote published" rather than a number.
 _NO_VALUE = {"", "--", "—", "n/a", "na", "null", "none"}
 
-#: Sanity bound: a real put/call ratio lives in [0, 30]. A 100x decimal
-#: shift (e.g. 88.0 stored as if it were 0.88) is corruption, not data.
-_MAX_RATIO = 30.0
+#: Sanity bound: a genuine daily put/call ratio lives in [0, 5].
+#: CBOE total/equity ratios rarely leave 0.5-1.5; index ratios run higher
+#: but readings above 5 are essentially unprecedented. A 10x decimal shift
+#: (0.88 -> 8.8) or 100x shift (0.25 -> 25) lands above 5 -> fail loud.
+#: A shift landing *inside* [0, 5] is indistinguishable from genuine data
+#: and cannot be caught by range alone -- accepted, documented limitation.
+_MAX_RATIO = 5.0
 
 #: Marker identifying a genuine CBOE daily-statistics page. A page without
 #: any ratio rows is a no-data day (weekend/holiday) -> return None and let
@@ -240,6 +244,7 @@ def run_backfill_m5(
     today = today_et()
     scraper = CboeScraper(client)
     fetched = skipped = 0
+    latest_fetched: date | None = None
     errors: list[dict] = []
     try:
         for back in range(days):
@@ -260,10 +265,31 @@ def run_backfill_m5(
                 continue
             session = SessionLocal(bind=engine)
             try:
-                CboePutCallRepository(session).upsert(_stamp(day, d))
+                try:
+                    CboePutCallRepository(session).upsert(_stamp(day, d))
+                except Exception as exc:  # noqa: BLE001 -- DB write isolated per day
+                    session.rollback()
+                    errors.append(
+                        {
+                            "trade_date": d.isoformat(),
+                            "error": f"upsert {type(exc).__name__}: {exc}",
+                        }
+                    )
+                    continue
             finally:
                 session.close()
             fetched += 1
+            if latest_fetched is None or d > latest_fetched:
+                latest_fetched = d
     finally:
         scraper.close()
+    session = SessionLocal(bind=engine)
+    try:
+        freshness = FreshnessRepository(session)
+        if latest_fetched is not None:
+            freshness.mark("m5", latest_fetched)
+        else:
+            freshness.touch("m5")
+    finally:
+        session.close()
     return {"fetched": fetched, "skipped": skipped, "errors": errors}

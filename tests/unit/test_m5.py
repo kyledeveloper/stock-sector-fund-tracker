@@ -81,6 +81,27 @@ def test_parse_decimal_shift_fails_loud():
         cboe.parse_cboe_daily(html, "2026-09-30")
 
 
+def test_parse_10x_decimal_shift_fails_loud():
+    """A 10x decimal shift (8.8 instead of 0.88) must also raise, not store.
+
+    Red-team M1: the old [0, 30] sanity bound let 10x/100x shifts through
+    when they landed <= 30 (e.g. 0.25 -> 25.0). The [0, 5] bound catches
+    them; this test pins that contract.
+    """
+    cboe = _cboe()
+    html = SAMPLE.replace(">0.88</td>", ">8.8</td>")
+    with pytest.raises(cboe.CboeParseError):
+        cboe.parse_cboe_daily(html, "2026-09-30")
+
+
+def test_parse_100x_shift_inside_old_bound_fails_loud():
+    """0.25 -> 25.0: the case the old bound [0, 30] missed."""
+    cboe = _cboe()
+    html = SAMPLE.replace(">0.53</td>", ">25.0</td>")
+    with pytest.raises(cboe.CboeParseError):
+        cboe.parse_cboe_daily(html, "2026-09-30")
+
+
 def _api_client(tmp_path, monkeypatch, rows):
     """TestClient against a seeded file-backed SQLite DB (TestClient serves
     on another thread, so :memory: is not usable -- same pattern as
