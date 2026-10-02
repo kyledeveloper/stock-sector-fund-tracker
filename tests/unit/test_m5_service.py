@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from freezegun import freeze_time
 from sqlalchemy import create_engine
 
 from moneyflow.common.http import PoliteClient
@@ -95,6 +96,7 @@ def test_run_m5_garbled_page_raises(engine):
     assert repo.latest() is None  # fail-loud: nothing stored
 
 
+@freeze_time("2026-10-03 12:00:00")  # Sat 08:00 ET: trailing 5-day window covers a weekend
 def test_backfill_skips_weekends_before_requesting(engine):
     """Weekend dates are skipped by is_trading_day -- never even requested."""
     requested: list[str] = []
