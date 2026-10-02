@@ -24,10 +24,16 @@ export interface SectorMomentum {
   rrg_quadrant: "leading" | "weakening" | "lagging" | "improving" | "";
 }
 
-export interface PutCallRatio {
-  as_of: string;
-  scope: "total" | "equity" | "index" | "vix" | "etp";
-  ratio: number;
+export interface PutCallPoint {
+  date: string; // YYYY-MM-DD (ET)
+  total_put_call: number;
+  equity_put_call: number;
+}
+
+export interface PutCallSeries {
+  data: PutCallPoint[];
+  as_of: string | null;
+  stale: boolean;
 }
 
 export interface FilingEvent {

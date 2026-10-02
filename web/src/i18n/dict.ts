@@ -90,6 +90,17 @@ export const zh = {
     firstQuarterNote:
       "注意：这是该机构入库的首个季度，所有持仓都标记为“新建仓”；环比变化自下个季度起生效。",
   },
+  m5: {
+    title: "期权情绪 Put/Call",
+    // Mandatory honesty wording: CBOE public stats, T+1, sentiment
+    // only -- not fund flow, not a forecast.
+    desc: "CBOE 公开市场统计的延迟展示（T+1），反映期权市场多空情绪，非资金流、不构成预测。",
+    legendTotal: "总量 Put/Call",
+    legendEquity: "个股 Put/Call",
+    refLine: "0.7 参考线",
+    noData:
+      "暂无数据（先运行回填：python -m moneyflow.pipeline.daily backfill-m5）",
+  },
 };
 
 export type Dict = typeof zh;
@@ -174,5 +185,14 @@ export const en: Dict = {
     f4Joint: "Joint filing",
     firstQuarterNote:
       "Note: this is the first quarter on file for this manager, so every position is badged “new”; quarter-over-quarter changes take effect from next quarter.",
+  },
+  m5: {
+    title: "Options Sentiment Put/Call",
+    desc: "Delayed T+1 display of CBOE public market statistics, reflecting bullish/bearish sentiment in the options market. Not fund flow, not a forecast.",
+    legendTotal: "Total put/call",
+    legendEquity: "Equity put/call",
+    refLine: "0.7 reference",
+    noData:
+      "No data yet (run the backfill first: python -m moneyflow.pipeline.daily backfill-m5)",
   },
 };
