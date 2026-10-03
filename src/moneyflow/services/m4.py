@@ -51,9 +51,24 @@ def run_13f(engine, client: PoliteClient | None = None) -> dict:
                     stored = repo.report_dates(cik10)
                     ref, _ = peek_latest_13f(cik, name, client)
                     stats["checked"] += 1
-                    if stored and ref.report_date <= stored[0]:
-                        continue  # already have this quarter (or newer)
+                    replace = False
+                    if stored:
+                        if ref.report_date < stored[0]:
+                            continue  # defensive: stored quarter is newer
+                        if ref.report_date == stored[0]:
+                            # Same quarter: adopt a newer filing (13F-HR/A).
+                            # latest_13f_hr sorts amendments newest-first, but
+                            # the old report_date-only check skipped them
+                            # forever once the base filing was ingested.
+                            stored_filed = repo.filed_at_for(cik10, stored[0])
+                            if stored_filed is None or ref.filing_date <= stored_filed:
+                                continue  # already have this filing (or newer)
+                            replace = True
+                    # Fetch BEFORE deleting: a failed fetch must not wipe
+                    # the good quarter we already have.
                     holdings = fetch_13f_holdings(cik, name, client)
+                    if replace:
+                        repo.delete_quarter(cik10, stored[0])
                     n = repo.upsert_many(holdings)
                     stats["fetched"] += 1
                     stats["holdings"] += n
@@ -141,8 +156,9 @@ def run_form4(
 
     M1: one poison filing (malformed XML, missing ticker, transient 403)
     no longer kills the whole market-wide scan -- it is recorded in
-    stats["errors"] and the scan continues. Freshness is still marked:
-    a partial scan with loud errors beats a silent 4-day blackout.
+    stats["errors"] and the scan continues. Freshness is still marked for a
+    partial scan (loud errors beat a silent 4-day blackout), but a total
+    failure (search ok, every filing failed) only touch()es -- H2.
     M6: volume above FORM4_SOFT_WARN logs a loud warning but the scan
     continues; only above FORM4_HARD_CAP does it fail loud (true drift).
     """
@@ -189,7 +205,15 @@ def run_form4(
                     for t in filing.transactions
                     if t.is_open_market_buy and (filing.is_officer or filing.is_director)
                 )
-            FreshnessRepository(session).mark("m4", end)
+            # Freshness: a partial scan with loud errors beats a silent 4-day
+            # blackout -- EXCEPT when nothing was verified at all. H2
+            # (review 2026-10-02): EFTS search succeeded but every filing
+            # failed -> touch(), not mark(): painting m4 fresh would hide a
+            # total Form 4 outage behind a green badge.
+            if stats["errors"] and stats["fetched"] == 0:
+                FreshnessRepository(session).touch("m4")
+            else:
+                FreshnessRepository(session).mark("m4", end)
             return stats
         finally:
             session.close()

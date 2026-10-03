@@ -59,6 +59,35 @@ class ThirteenFHoldingRepository:
         ).all()
         return [date.fromisoformat(r[0]) for r in rows]
 
+    def filed_at_for(self, cik: str, report_date: date) -> date | None:
+        """Newest filing date ingested for one quarter.
+
+        Used for 13F-HR/A amendment detection: an amendment shares the
+        quarter's report_date but has a newer filing_date.
+        """
+        row = self._s.execute(
+            text(
+                "SELECT MAX(filed_at) FROM thirteenf_holding WHERE cik = :cik AND report_date = :rd"
+            ),
+            {"cik": cik, "rd": _iso(report_date)},
+        ).scalar()
+        return date.fromisoformat(row) if row else None
+
+    def delete_quarter(self, cik: str, report_date: date) -> int:
+        """Delete one quarter's rows before an amendment replace.
+
+        13F-HR/A restates the whole quarter: merge-by-upsert would leave
+        removed positions behind forever, so the quarter is replaced,
+        not merged. Does NOT commit -- the caller's following upsert_many
+        commits the delete+insert atomically, so a failed upsert can never
+        leave the quarter half-deleted. Returns rows deleted.
+        """
+        res = self._s.execute(
+            text("DELETE FROM thirteenf_holding WHERE cik = :cik AND report_date = :rd"),
+            {"cik": cik, "rd": _iso(report_date)},
+        )
+        return res.rowcount
+
     def for_quarter(self, cik: str, report_date: date) -> list[ThirteenFHolding]:
         rows = self._s.execute(
             text(

@@ -199,13 +199,19 @@ def run_all_cmd() -> None:
             if m5["skipped"]
             else f"total {m5['total_put_call']} as of {m5['trade_date']}"
         )
+        # H2 (review 2026-10-02): "m4 ok" must not hide per-manager/per-filing
+        # errors. Exit code stays 0 (the timer completed its run; errors are
+        # recorded in stats and freshness now reflects total failures), but
+        # the summary says how many there were.
+        m4_errors = len(result["m4_13f"]["errors"]) + len(result["m4_form4"]["errors"])
+        m4_note = f", {m4_errors} errors" if m4_errors else ""
         typer.echo(
             f"{result['today']}: m2 ok ({result['m2']['exposures']} exposures), "
             f"m3 ok ({result['m3']['sectors']} sectors), "
             f"m4 ok (13f: {result['m4_13f']['checked']} checked / "
             f"{result['m4_13f']['fetched']} new quarters; "
             f"form4: {result['m4_form4']['fetched']} new filings, "
-            f"{result['m4_form4']['buys']} buys), "
+            f"{result['m4_form4']['buys']} buys{m4_note}), "
             f"m5 ok ({m5_info})."
         )
 

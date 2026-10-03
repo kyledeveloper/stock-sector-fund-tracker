@@ -190,7 +190,7 @@ class InsiderTransaction(BaseModel):
     transaction_date: date
     transaction_code: str  # P = open-market purchase, S = sale, ...
     acquired_disposed: str  # "A" | "D"
-    shares: int
+    shares: float  # fractional shares are legitimate (DRIPs, splits)
     price: float | None = None
     value_usd: float | None = None  # shares * price
     side: str = ""  # "buy" | "sell" (from acquired/disposed)
@@ -226,7 +226,7 @@ class InsiderBuyView(BaseModel):
     officer_title: str = ""
     filed_at: date
     transaction_date: date
-    shares: int
+    shares: float  # fractional shares are legitimate (DRIPs, splits)
     price: float | None = None
     value_usd: float | None = None
     is_10b5_1: bool = False

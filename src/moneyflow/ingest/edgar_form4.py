@@ -83,7 +83,10 @@ def parse_form4(xml: bytes, *, accession_number: str = "", form_type: str = "4")
     for ordinal, node in enumerate(root.findall(".//nonDerivativeTransaction")):
         code = _text(node, "transactionCoding/transactionCode")
         ad = _text(node, "transactionAmounts/transactionAcquiredDisposedCode/value")
-        shares = int(_text(node, "transactionAmounts/transactionShares/value", required=True))
+        # M1 (review 2026-10-02): fractional shares are legitimate (DRIPs,
+        # splits). int("10.5") used to raise and drop the whole filing;
+        # float() keeps them. Non-numeric garbage still fails loud.
+        shares = float(_text(node, "transactionAmounts/transactionShares/value", required=True))
         price_raw = _text(node, "transactionAmounts/transactionPricePerShare/value")
         price = float(price_raw) if price_raw else None
         footnote_text = " ".join(

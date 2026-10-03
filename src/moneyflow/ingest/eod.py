@@ -125,6 +125,16 @@ class YahooEodAdapter(SourceAdapter):
                 continue  # red-team M5: still-forming bar, drop it
             adj_close = adj[i] if adj and i < len(adj) else None
             raw_close = closes[i] if i < len(closes) else None
+            if adj_close is None and raw_close is not None and adj:
+                # M2 (review 2026-10-02): a single null adjclose with a valid
+                # raw close must not silently fall back to the raw close --
+                # that mixes adjusted and unadjusted prices in one series.
+                # (adj entirely absent -> all-raw series, consistent; both
+                # null -> padded non-trading day, dropped below.)
+                raise ValueError(
+                    f"Yahoo {self.ticker}: null adjclose for {bar_date}"
+                    " with valid close (refusing to mix adjusted/unadjusted)"
+                )
             close = adj_close if adj_close is not None else raw_close
             if close is None:
                 continue  # Yahoo pads some non-trading days with nulls

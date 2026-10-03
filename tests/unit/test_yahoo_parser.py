@@ -131,3 +131,19 @@ def test_naive_now_rejected():
         assert "timezone-aware" in str(e)
     else:  # pragma: no cover
         raise AssertionError("expected ValueError")
+
+
+def test_null_adjclose_with_valid_raw_close_raises_loudly():
+    """M2 (review 2026-10-02): a single null adjclose with a valid raw
+    close must not silently fall back to the raw close (mixing adjusted
+    and unadjusted prices in one series). Unlike test_drops_null_close_rows
+    (both null -> drop), this mixed case fails loud."""
+    payload = json.loads(FIXTURE.read_text())
+    adj = payload["chart"]["result"][0]["indicators"]["adjclose"][0]["adjclose"]
+    adj[10] = None  # raw close at index 10 stays valid
+    try:
+        YahooEodAdapter("XLK", now=AFTER_CLOSE).parse(json.dumps(payload).encode())
+    except ValueError as e:
+        assert "adjclose" in str(e)
+    else:  # pragma: no cover
+        raise AssertionError("expected ValueError for null adjclose with valid close")

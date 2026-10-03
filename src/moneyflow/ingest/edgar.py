@@ -158,7 +158,25 @@ def parse_13f_infotable(
                 put_call=_text(row, "putCall"),
             )
         )
-    return out
+    # M3 (review 2026-10-02): the same (cusip, putCall) can appear more
+    # than once in one info table. The repository's conflict key keeps a
+    # single row per (report_date, cik, cusip, put_call), so aggregate here
+    # (sum value + shares, keep the first row's descriptors) instead of
+    # letting last-write-wins silently drop value.
+    aggregated: dict[tuple[str, str], ThirteenFHolding] = {}
+    for h in out:
+        key = (h.cusip, h.put_call)
+        if key in aggregated:
+            prev = aggregated[key]
+            aggregated[key] = prev.model_copy(
+                update={
+                    "value_usd": prev.value_usd + h.value_usd,
+                    "shares": prev.shares + h.shares,
+                }
+            )
+        else:
+            aggregated[key] = h
+    return list(aggregated.values())
 
 
 class _NoInfotableDoc(ValueError):

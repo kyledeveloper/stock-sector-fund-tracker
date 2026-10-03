@@ -70,3 +70,39 @@ def test_malformed_xml_fails_loud():
         pass
     else:  # pragma: no cover
         raise AssertionError("expected ValueError")
+
+
+def test_duplicate_cusip_putcall_rows_are_summed():
+    """M3 (review 2026-10-02): the same (cusip, putCall) twice in one info
+    table must be summed -- the DB conflict key keeps only one row, so
+    last-write-wins would silently drop value. Call legs aggregate
+    separately from common stock."""
+    xml = (
+        b"<informationTable>"
+        b"<infoTable><nameOfIssuer>AAA CORP</nameOfIssuer>"
+        b"<titleOfClass>COM</titleOfClass><cusip>111111111</cusip>"
+        b"<value>1000</value><shrsOrPrnAmt><sshPrnamt>10</sshPrnamt>"
+        b"<sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>"
+        b"<infoTable><nameOfIssuer>AAA CORP</nameOfIssuer>"
+        b"<titleOfClass>COM</titleOfClass><cusip>111111111</cusip>"
+        b"<value>2000</value><shrsOrPrnAmt><sshPrnamt>20</sshPrnamt>"
+        b"<sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>"
+        b"<infoTable><nameOfIssuer>AAA CORP</nameOfIssuer>"
+        b"<titleOfClass>COM</titleOfClass><cusip>111111111</cusip>"
+        b"<putCall>Call</putCall><value>500</value>"
+        b"<shrsOrPrnAmt><sshPrnamt>5</sshPrnamt>"
+        b"<sshPrnamtType>SH</sshPrnamtType></shrsOrPrnAmt></infoTable>"
+        b"</informationTable>"
+    )
+    rows = parse_13f_infotable(
+        xml,
+        cik="x",
+        filer_name="x",
+        report_date=date(2026, 3, 31),
+        filed_at=date(2026, 5, 15),
+    )
+    assert len(rows) == 2
+    common = next(r for r in rows if r.put_call == "")
+    assert common.value_usd == 3000 and common.shares == 30
+    call = next(r for r in rows if r.put_call == "Call")
+    assert call.value_usd == 500 and call.shares == 5

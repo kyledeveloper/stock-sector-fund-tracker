@@ -153,9 +153,7 @@ def test_total_13f_outage_does_not_mark_fresh(tmp_path):
     def all_403(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, text="forbidden")
 
-    client = PoliteClient(
-        transport=httpx.MockTransport(all_403), trust_env=False, min_interval_s=0
-    )
+    client = PoliteClient(transport=httpx.MockTransport(all_403), trust_env=False, min_interval_s=0)
     stats = m4_service.run_13f(engine, client=client)
     assert stats["checked"] == 0 and stats["fetched"] == 0
     assert len(stats["errors"]) == 12
@@ -514,3 +512,293 @@ def test_10b5_1_negation_not_flagged():
         )
     )
     assert parse_form4(yes).transactions[0].is_10b5_1 is True
+
+
+# ---------------------------------------------------------------------------
+# H1 (review 2026-10-02): 13F-HR/A amendments must be adopted.
+# A same-quarter amendment shares the report_date but has a newer
+# filing_date. The old report_date-only skip dropped it forever, and
+# merge-by-upsert would have left removed positions behind.
+# ---------------------------------------------------------------------------
+
+
+def _infotable_xml(rows: list[tuple[str, str, int, int]]) -> bytes:
+    """Minimal 13F info table. rows: (issuer, cusip, value_usd, shares)."""
+    body = "".join(
+        "<infoTable>"
+        f"<nameOfIssuer>{issuer}</nameOfIssuer>"
+        "<titleOfClass>COM</titleOfClass>"
+        f"<cusip>{cusip}</cusip>"
+        f"<value>{value}</value>"
+        "<shrsOrPrnAmt>"
+        f"<sshPrnamt>{shares}</sshPrnamt>"
+        "<sshPrnamtType>SH</sshPrnamtType>"
+        "</shrsOrPrnAmt>"
+        "</infoTable>"
+        for issuer, cusip, value, shares in rows
+    )
+    return f"<informationTable>{body}</informationTable>".encode()
+
+
+def _mock_client_for(report_date: str, filing_date: str, form: str, xml: bytes) -> PoliteClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "submissions/CIK" in url:
+            cik10 = url.rsplit("CIK", 1)[1].split(".")[0]
+            return httpx.Response(
+                200,
+                json={
+                    "name": BY_CIK[cik10] + ", LLC",
+                    "filings": {
+                        "recent": {
+                            "accessionNumber": ["0000000000-26-000009"],
+                            "filingDate": [filing_date],
+                            "form": [form],
+                            "reportDate": [report_date],
+                        }
+                    },
+                },
+            )
+        if url.endswith("index.json"):
+            return httpx.Response(
+                200,
+                json={
+                    "directory": {
+                        "item": [
+                            {"name": "primary_doc.xml"},
+                            {"name": "infotable.xml"},
+                        ]
+                    }
+                },
+            )
+        if url.endswith("infotable.xml"):
+            return httpx.Response(200, content=xml)
+        return httpx.Response(404, text="not found")
+
+    return PoliteClient(transport=httpx.MockTransport(handler), trust_env=False, min_interval_s=0)
+
+
+def _quarter_cusips(engine, cik10: str, report_date: str) -> dict[str, int]:
+    from moneyflow.store.db import SessionLocal
+    from moneyflow.store.repos import ThirteenFHoldingRepository
+
+    session = SessionLocal(bind=engine)
+    try:
+        from datetime import date as _date
+
+        rows = ThirteenFHoldingRepository(session).for_quarter(
+            cik10, _date.fromisoformat(report_date)
+        )
+        return {r.cusip: r.value_usd for r in rows}
+    finally:
+        session.close()
+
+
+def test_run_13f_amendment_same_quarter_replaces(tmp_path):
+    """H1: a 13F-HR/A filed after ingest replaces the quarter.
+
+    Base: AAA + BBB. Amendment: BBB restated, CCC added, AAA removed.
+    After the amendment run the quarter must be exactly {BBB, CCC} --
+    AAA must not linger (no merge-by-upsert).
+    """
+    engine = _engine(tmp_path)
+    base = _infotable_xml(
+        [("AAA CORP", "111111111", 1000, 10), ("BBB CORP", "222222222", 2000, 20)]
+    )
+    amend = _infotable_xml(
+        [("BBB CORP", "222222222", 9999, 99), ("CCC CORP", "333333333", 3000, 30)]
+    )
+    s1 = m4_service.run_13f(
+        engine, client=_mock_client_for("2026-03-31", "2026-05-15", "13F-HR", base)
+    )
+    assert s1["fetched"] == 12 and s1["errors"] == []
+
+    s2 = m4_service.run_13f(
+        engine, client=_mock_client_for("2026-03-31", "2026-08-20", "13F-HR/A", amend)
+    )
+    assert s2["fetched"] == 12, "amendment must be adopted, not skipped"
+    assert s2["errors"] == []
+
+    cusips = _quarter_cusips(engine, "0001649339", "2026-03-31")
+    assert set(cusips) == {"222222222", "333333333"}, "AAA must be deleted"
+    assert cusips["222222222"] == 9999, "BBB must carry the amended value"
+
+
+def test_run_13f_same_filing_not_refetched(tmp_path):
+    """H1: same report_date AND same filing_date -> skip (no churn)."""
+    engine = _engine(tmp_path)
+    base = _infotable_xml([("AAA CORP", "111111111", 1000, 10)])
+    m4_service.run_13f(engine, client=_mock_client_for("2026-03-31", "2026-05-15", "13F-HR", base))
+    s2 = m4_service.run_13f(
+        engine, client=_mock_client_for("2026-03-31", "2026-05-15", "13F-HR", base)
+    )
+    assert s2["fetched"] == 0 and s2["errors"] == []
+
+
+def test_run_13f_failed_amendment_fetch_keeps_old_quarter(tmp_path):
+    """H1: fetch-before-delete -- a failed amendment fetch must not wipe
+    the good quarter we already have."""
+    engine = _engine(tmp_path)
+    base = _infotable_xml([("AAA CORP", "111111111", 1000, 10)])
+    m4_service.run_13f(engine, client=_mock_client_for("2026-03-31", "2026-05-15", "13F-HR", base))
+
+    def bad_handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if "submissions/CIK" in url:
+            cik10 = url.rsplit("CIK", 1)[1].split(".")[0]
+            return httpx.Response(
+                200,
+                json={
+                    "name": BY_CIK[cik10] + ", LLC",
+                    "filings": {
+                        "recent": {
+                            "accessionNumber": ["0000000000-26-000009"],
+                            "filingDate": ["2026-08-20"],
+                            "form": ["13F-HR/A"],
+                            "reportDate": ["2026-03-31"],
+                        }
+                    },
+                },
+            )
+        return httpx.Response(404, text="gone")  # index.json 404s -> fetch fails
+
+    client = PoliteClient(
+        transport=httpx.MockTransport(bad_handler), trust_env=False, min_interval_s=0
+    )
+    s2 = m4_service.run_13f(engine, client=client)
+    assert s2["fetched"] == 0 and len(s2["errors"]) == 12
+    # old quarter intact
+    assert set(_quarter_cusips(engine, "0001649339", "2026-03-31")) == {"111111111"}
+
+
+# ---------------------------------------------------------------------------
+# M1 (review 2026-10-02): fractional shares must not kill a whole filing.
+# DRIPs and splits produce fractional share counts in transactionShares;
+# int("10.5") raised and the per-filing isolation dropped every transaction.
+# ---------------------------------------------------------------------------
+
+from moneyflow.ingest.edgar_form4 import parse_form4  # noqa: E402
+
+
+def test_fractional_shares_parsed_not_dropped():
+    xml = _filing_xml([_txn_row(shares=1000, price=50.0), _txn_row(shares="10.5", price=50.0)])
+    filing = parse_form4(xml)
+    assert len(filing.transactions) == 2
+    assert filing.transactions[0].shares == 1000
+    assert filing.transactions[1].shares == 10.5
+    assert filing.transactions[1].value_usd == 10.5 * 50.0
+
+
+def test_garbage_shares_still_fail_loud():
+    xml = _filing_xml([_txn_row(shares="N/A", price=50.0)])
+    try:
+        parse_form4(xml)
+    except ValueError:
+        return
+    raise AssertionError("expected ValueError for non-numeric shares")
+
+
+# ---------------------------------------------------------------------------
+# H2 (review 2026-10-02): run_form4 total failure must not mark m4 fresh.
+# EFTS search succeeds but every filing fetch/parse/upsert fails ->
+# touch() (stale), not mark() (fresh). Partial scans and quiet days keep
+# the old behavior (a partial scan with loud errors beats a silent
+# 4-day blackout; a genuinely quiet day is a successful run).
+# ---------------------------------------------------------------------------
+
+
+def test_run_form4_total_failure_does_not_mark_fresh(tmp_path):
+    from datetime import date
+
+    from moneyflow.store.db import SessionLocal
+    from moneyflow.store.repos import FreshnessRepository
+
+    engine = _engine(tmp_path)
+    adshs = ["0000000002-26-000001", "0000000003-26-000001"]
+    client = _form4_client({}, adshs)  # search ok, every filing fetch 404s
+    stats = m4_scan.run_form4(engine, client=client, end=date(2026, 10, 1))
+    assert stats["scanned"] == 2 and stats["fetched"] == 0
+    assert len(stats["errors"]) == 2
+    session = SessionLocal(bind=engine)
+    try:
+        as_of, checked_at = FreshnessRepository(session).all()["m4"]
+    finally:
+        session.close()
+    assert as_of is None  # touch(), not mark(today)
+    assert checked_at is not None
+
+
+def test_run_form4_partial_failure_still_marks(tmp_path):
+    """Partial scan with loud errors -> still marks (loud errors in the
+    stats beat a silent blackout)."""
+    from datetime import date
+
+    from moneyflow.store.db import SessionLocal
+    from moneyflow.store.repos import FreshnessRepository
+
+    engine = _engine(tmp_path)
+    good = "0000000002-26-000001"
+    bad = "0000000003-26-000001"
+    client = _form4_client({good: _BUY_FILING_XML}, [good, bad])
+    stats = m4_scan.run_form4(engine, client=client, end=date(2026, 10, 1))
+    assert stats["fetched"] == 1 and len(stats["errors"]) == 1
+    session = SessionLocal(bind=engine)
+    try:
+        as_of, _ = FreshnessRepository(session).all()["m4"]
+    finally:
+        session.close()
+    assert as_of is not None and str(as_of) == "2026-10-01"
+
+
+def test_run_form4_quiet_day_still_marks(tmp_path):
+    """No filings in the window is a successful run, not a failure."""
+    from datetime import date
+
+    from moneyflow.store.db import SessionLocal
+    from moneyflow.store.repos import FreshnessRepository
+
+    engine = _engine(tmp_path)
+    client = _form4_client({}, [])
+    stats = m4_scan.run_form4(engine, client=client, end=date(2026, 10, 1))
+    assert stats["scanned"] == 0 and stats["fetched"] == 0
+    assert stats["errors"] == []
+    session = SessionLocal(bind=engine)
+    try:
+        as_of, _ = FreshnessRepository(session).all()["m4"]
+    finally:
+        session.close()
+    assert as_of is not None and str(as_of) == "2026-10-01"
+
+
+def test_delete_quarter_does_not_commit_alone(tmp_path):
+    """H1 atomicity contract: delete_quarter must not commit by itself --
+    the amendment path commits delete+upsert together, so a failed upsert
+    can never leave a quarter half-deleted."""
+    from datetime import date
+
+    from moneyflow.models import ThirteenFHolding
+    from moneyflow.store.db import SessionLocal
+    from moneyflow.store.repos import ThirteenFHoldingRepository
+
+    engine = _engine(tmp_path)
+    session = SessionLocal(bind=engine)
+    try:
+        repo = ThirteenFHoldingRepository(session)
+        repo.upsert_many(
+            [
+                ThirteenFHolding(
+                    report_date=date(2026, 3, 31),
+                    filed_at=date(2026, 5, 15),
+                    cik="0001649339",
+                    issuer="AAA",
+                    cusip="111111111",
+                    value_usd=1000,
+                    shares=10,
+                )
+            ]
+        )
+        assert repo.delete_quarter("0001649339", date(2026, 3, 31)) == 1
+        session.rollback()  # must restore the row -> delete was uncommitted
+        assert len(repo.for_quarter("0001649339", date(2026, 3, 31))) == 1
+    finally:
+        session.close()

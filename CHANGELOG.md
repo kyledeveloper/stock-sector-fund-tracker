@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## 第三方代码审阅修复（2026-10-02）
+
+6 项审阅结论中 4.5 项经逐条核实成立，已修复（RED 回归测试先行）：
+
+### 修复
+- **H1 — 13F 修正案生效**：同季度 13F-HR/A 曾因 `report_date` 相同被永久跳过。现比较 `filing_date`：修正案更新时先抓取、成功后再 `delete_quarter` + upsert 整季度替换（被删除的仓位不再残留；抓取失败不删旧数据）。
+- **M1 — Form 4 小数股数**：`transactionShares` 曾用 `int()`，小数（DRIP/拆股）导致整份 filing 被丢弃。现解析为 `float`（`InsiderTransaction.shares` / `InsiderBuyView.shares` 同步改为 float；SQLite 列 affinity 兼容，无需 migration）；非数字仍 fail-loud。
+- **M2 — Yahoo 单根 adjclose 为 null**：曾静默回退到 raw close，混用复权/未复权价格。现该情形直接 `ValueError`（与 blocker-1 的 fail-loud 一致）；adj 整体缺失（全 raw 序列）与双 null（非交易日补位行丢弃）行为不变。
+- **前端金额 `$0K`**：`Form4Panel` 的 `fmtMoney` 对 <$1000 显示 `$0K`/`$1K`。现 <$1000 显示原值美元。
+- **H2 — Form 4 全失败仍标 fresh**：EFTS 搜索成功但所有 filing 抓取失败时，曾无条件 `mark("m4")`。现 `errors` 非空且 `fetched == 0` 时只 `touch()`（stale）；部分成功与静默日（scanned == 0）仍正常 mark。`run-all` 输出的 `m4 ok` 后追加错误计数，不再掩盖 per-filing 错误。
+- **M3 — 13F 同 CUSIP+putCall 多行**：`parse_13f_infotable` 现按 `(cusip, put_call)` 聚合（value/shares 求和），不再 last-write-wins 丢金额。
+
+### 不成立
+- "CBOE 缺交易日会被前后两天连线"：`PutCallPanel` 已设 `connectNulls: false`，描述的 bug 不存在。
+
 ## Phase 4 — M5 期权情绪 + hardening + 部署（2026-10-02）
 
 ### 新增

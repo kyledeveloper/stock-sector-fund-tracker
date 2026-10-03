@@ -7,7 +7,9 @@ import type { Freshness, InsiderBuyView } from "../api/types";
 function fmtMoney(v: number | null): string {
   if (v === null) return "—";
   if (v >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
-  return `$${(v / 1e3).toFixed(0)}K`;
+  if (v >= 1e3) return `$${(v / 1e3).toFixed(0)}K`;
+  // Review 2026-10-02: sub-$1000 values rendered as "$0K"/"$1K".
+  return `$${v.toFixed(0)}`;
 }
 
 /**
