@@ -5,12 +5,11 @@
 ## 1. 部署步骤（从本机迁移）
 
 ```bash
-# 1) 在 VPS 上 clone / 拷 repo（本 repo 无 remote，用 scp/rsync 拷整个目录）
-rsync -avz --exclude data/ --exclude web/node_modules \
-  ~/workspace/us-moneyflow/ user@vps:~/us-moneyflow/
+# 1) 在 VPS 上 clone repo（目录名保持仓库名，systemd unit 依赖这个路径）
+git clone https://github.com/kyledeveloper/stock-sector-fund-tracker ~/stock-sector-fund-tracker
 
 # 2) 建 venv 并安装
-cd ~/us-moneyflow
+cd ~/stock-sector-fund-tracker
 python3.12 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 
@@ -39,8 +38,8 @@ After=network-online.target
 [Service]
 Type=oneshot
 User=moneyflow
-WorkingDirectory=/home/moneyflow/us-moneyflow
-ExecStart=/home/moneyflow/us-moneyflow/.venv/bin/python -m moneyflow.pipeline.daily run-all
+WorkingDirectory=/home/moneyflow/stock-sector-fund-tracker
+ExecStart=/home/moneyflow/stock-sector-fund-tracker/.venv/bin/python -m moneyflow.pipeline.daily run-all
 # 日志进 journal：journalctl -u moneyflow.service
 ```
 
@@ -77,8 +76,8 @@ After=network-online.target
 [Service]
 Type=simple
 User=moneyflow
-WorkingDirectory=/home/moneyflow/us-moneyflow
-ExecStart=/home/moneyflow/us-moneyflow/.venv/bin/uvicorn moneyflow.api.main:app --host 127.0.0.1 --port 8000
+WorkingDirectory=/home/moneyflow/stock-sector-fund-tracker
+ExecStart=/home/moneyflow/stock-sector-fund-tracker/.venv/bin/uvicorn moneyflow.api.main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 ```
 前端 `web/dist` 已由 FastAPI 直接 serve（`WEB_DIST` 存在即挂载），单服务即可。
@@ -92,7 +91,7 @@ Restart=on-failure
 
 ```bash
 # 每日一次（cron 或另一个 timer），保留 7 天
-sqlite3 /home/moneyflow/us-moneyflow/data/moneyflow.db \
+sqlite3 /home/moneyflow/stock-sector-fund-tracker/data/moneyflow.db \
   ".backup '/home/moneyflow/backups/moneyflow-$(date +%F).db'"
 find /home/moneyflow/backups -name 'moneyflow-*.db' -mtime +7 -delete
 ```

@@ -118,6 +118,7 @@ def test_backfill_skips_weekends_before_requesting(engine):
     assert len(stored) == result["fetched"]
 
 
+@freeze_time("2026-10-14 18:00:00")  # Wed 14:00 ET: 3-day window Mon-Wed all trade
 def test_backfill_single_day_failure_does_not_abort(engine):
     """One garbled day is recorded in errors; the rest still land."""
     from moneyflow.common.trading_day import last_trading_day_before
@@ -141,6 +142,7 @@ def test_backfill_single_day_failure_does_not_abort(engine):
     assert len(repo.series(365)) == trading_in_window - 1
 
 
+@freeze_time("2026-10-14 18:00:00")  # Wed 14:00 ET: 3-day window Mon-Wed all trade
 def test_backfill_upsert_failure_isolated_and_recorded(engine, monkeypatch):
     """A DB write failure on one day is recorded in errors; the backfill
     continues with the remaining days (red-team M2)."""
