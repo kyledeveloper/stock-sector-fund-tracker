@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python 3.12 (ruff, pytest x3, pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # pytest-socket: any test that opens a TCP/UDP socket fails. vcrpy cassettes
+      # (record_mode="once") replay from tests/fixtures, so no test needs the network.
+      PYTEST_ADDOPTS: "--disable-socket --allow-unix-socket -p no:cacheprovider"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+
+      - name: Install dependencies from lock file
+        run: |
+          python -m pip install --upgrade pip
+          pip install --require-hashes -r requirements-dev.lock
+          pip install --no-deps -e .
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: pytest (America/Los_Angeles)
+        run: pytest -q
+        env:
+          TZ: America/Los_Angeles
+
+      - name: pytest (UTC)
+        run: pytest -q
+        env:
+          TZ: UTC
+
+      # Catches tests that depend on today's weekday (e.g. "last 3 calendar days"
+      # windows that break every Monday). libfaketime starts the process clock at a
+      # fixed Monday and lets it tick; freezegun inside tests still overrides it.
+      # Fixed date (not "next Monday") so CI is deterministic.
+      - name: Install libfaketime
+        run: sudo apt-get update -q && sudo apt-get install -y -q faketime
+
+      - name: pytest (clock = Monday 2026-10-19 10:00 ET)
+        run: faketime '2026-10-19 10:00:00' pytest -q
+        env:
+          TZ: America/New_York
+
+      - name: pip-audit (locked dependencies)
+        run: |
+          pip install pip-audit
+          pip-audit --strict --require-hashes --disable-pip -r requirements-dev.lock
+
+  web:
+    name: Frontend (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      # Blocking gate: runtime (shipped) dependencies, high or worse.
+      - name: npm audit (production deps, blocking)
+        run: npm audit --omit=dev --audit-level=high
+
+      # Non-blocking until the pending frontend upgrades land:
+      #  - vite <=6.4.2 (high; dev server only, not shipped) + esbuild <=0.24.2 (moderate)
+      #  - echarts <6.1.0 XSS GHSA-fgmj-fm8m-jvvx (moderate; Dev's echarts 6.x upgrade, plan phase 1)
+      # Remove continue-on-error once those upgrades are merged.
+      - name: npm audit (all deps, non-blocking)
+        run: npm audit --audit-level=high
+        continue-on-error: true
