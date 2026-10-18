@@ -6,6 +6,8 @@ M1 was cut from v1 (user decision 2026-10-01): no m1 command.
 
 from __future__ import annotations
 
+import logging
+
 import typer
 
 from moneyflow.common.trading_day import calendar_warning, is_trading_day, today_et
@@ -19,6 +21,7 @@ from moneyflow.store.migrate import apply_migrations
 from moneyflow.store.repos import FreshnessRepository
 
 app = typer.Typer(help="US money-flow daily pipeline")
+logger = logging.getLogger(__name__)
 
 
 def _engine():
@@ -57,6 +60,8 @@ def run_all(engine=None) -> dict:
         try:
             result[name] = run(engine)
         except Exception as exc:  # noqa: BLE001 -- isolation boundary, re-reported below
+            # Full traceback to stderr/journal; the summary keeps the one-liner.
+            logger.exception("module %s failed", name)
             result[name] = None
             result["errors"][name] = f"{type(exc).__name__}: {exc}"
     return result

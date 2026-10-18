@@ -99,3 +99,18 @@ def test_run_all_surfaces_calendar_warning(calls, tmp_path, monkeypatch):
     res = CliRunner().invoke(daily.app, ["run-all"])
     assert res.exit_code == 0, res.output
     assert "CALENDAR WARNING" in res.output
+
+
+@freeze_time("2026-10-14 18:00:00")
+def test_module_failure_logs_traceback(calls, tmp_path, caplog):
+    """Auditor P1 re-review #1: the journal must show where it broke."""
+    from moneyflow.store.db import get_engine
+
+    calls({"m3"})
+    with caplog.at_level("ERROR", logger="moneyflow.pipeline.daily"):
+        daily.run_all(get_engine(tmp_path / "t.db"))
+    recs = [r for r in caplog.records if r.levelname == "ERROR"]
+    assert len(recs) == 1
+    assert "m3" in recs[0].getMessage()
+    assert recs[0].exc_info is not None
+    assert "Traceback" in caplog.text and "m3 exploded" in caplog.text
