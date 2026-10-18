@@ -42,20 +42,24 @@ def run_all(engine=None) -> dict:
         finally:
             session.close()
         return {"skipped": True, "today": today}
-    m2_result = m2_service.run_m2(engine)
-    m3_result = m3_service.run_m3(engine)
-    m4_13f_result = m4_service.run_13f(engine)
-    m4_f4_result = m4_service.run_form4(engine)
-    m5_result = m5_service.run_m5(engine)
-    return {
-        "skipped": False,
-        "today": today,
-        "m2": m2_result,
-        "m3": m3_result,
-        "m4_13f": m4_13f_result,
-        "m4_form4": m4_f4_result,
-        "m5": m5_result,
-    }
+    # Auditor P1 #4: each module is isolated. One module raising must not
+    # cost the others their daily run; failures are collected and the CLI
+    # exits non-zero so the timer/journal shows the run as failed.
+    steps = (
+        ("m2", m2_service.run_m2),
+        ("m3", m3_service.run_m3),
+        ("m4_13f", m4_service.run_13f),
+        ("m4_form4", m4_service.run_form4),
+        ("m5", m5_service.run_m5),
+    )
+    result: dict = {"skipped": False, "today": today, "errors": {}}
+    for name, run in steps:
+        try:
+            result[name] = run(engine)
+        except Exception as exc:  # noqa: BLE001 -- isolation boundary, re-reported below
+            result[name] = None
+            result["errors"][name] = f"{type(exc).__name__}: {exc}"
+    return result
 
 
 @app.command()
@@ -187,33 +191,51 @@ def backfill_m5() -> None:
         typer.echo(f"  ERROR {e['trade_date']}: {e['error']}")
 
 
+def _summarize(result: dict) -> list[str]:
+    """One line per module; a failed module shows its error, never 'ok'."""
+    errors = result["errors"]
+
+    def m4_line() -> str:
+        if "m4_13f" in errors or "m4_form4" in errors:
+            parts = [f"{k} FAILED ({errors[k]})" for k in ("m4_13f", "m4_form4") if k in errors]
+            return "m4 " + "; ".join(parts)
+        r13, rf4 = result["m4_13f"], result["m4_form4"]
+        # H2 (review 2026-10-02): "m4 ok" must not hide per-manager/per-filing errors.
+        n = len(r13["errors"]) + len(rf4["errors"])
+        note = f", {n} errors" if n else ""
+        return (
+            f"m4 ok (13f: {r13['checked']} checked / {r13['fetched']} new quarters; "
+            f"form4: {rf4['fetched']} new filings, {rf4['buys']} buys{note})"
+        )
+
+    def m5_line() -> str:
+        m5 = result["m5"]
+        if m5["skipped"]:
+            return f"m5 ok (skipped ({m5['reason']}))"
+        return f"m5 ok (total {m5['total_put_call']} as of {m5['trade_date']})"
+
+    lines = []
+    for name, ok in (
+        ("m2", lambda: f"m2 ok ({result['m2']['exposures']} exposures)"),
+        ("m3", lambda: f"m3 ok ({result['m3']['sectors']} sectors)"),
+    ):
+        lines.append(f"{name} FAILED ({errors[name]})" if name in errors else ok())
+    lines.append(m4_line())
+    lines.append(f"m5 FAILED ({errors['m5']})" if "m5" in errors else m5_line())
+    return lines
+
+
 @app.command(name="run-all")
 def run_all_cmd() -> None:
-    result = run_all()
+    result = run_all(_engine())
     if result["skipped"]:
         typer.echo(f"{result['today']}: not a trading day, writes skipped.")
-    else:
-        m5 = result["m5"]
-        m5_info = (
-            f"skipped ({m5['reason']})"
-            if m5["skipped"]
-            else f"total {m5['total_put_call']} as of {m5['trade_date']}"
-        )
-        # H2 (review 2026-10-02): "m4 ok" must not hide per-manager/per-filing
-        # errors. Exit code stays 0 (the timer completed its run; errors are
-        # recorded in stats and freshness now reflects total failures), but
-        # the summary says how many there were.
-        m4_errors = len(result["m4_13f"]["errors"]) + len(result["m4_form4"]["errors"])
-        m4_note = f", {m4_errors} errors" if m4_errors else ""
-        typer.echo(
-            f"{result['today']}: m2 ok ({result['m2']['exposures']} exposures), "
-            f"m3 ok ({result['m3']['sectors']} sectors), "
-            f"m4 ok (13f: {result['m4_13f']['checked']} checked / "
-            f"{result['m4_13f']['fetched']} new quarters; "
-            f"form4: {result['m4_form4']['fetched']} new filings, "
-            f"{result['m4_form4']['buys']} buys{m4_note}), "
-            f"m5 ok ({m5_info})."
-        )
+        return
+    for line in _summarize(result):
+        typer.echo(f"{result['today']}: {line}")
+    if result["errors"]:
+        typer.echo(f"{result['today']}: {len(result['errors'])} module(s) FAILED")
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
