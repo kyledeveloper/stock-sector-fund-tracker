@@ -50,8 +50,9 @@ React + TypeScript + Vite + ECharts / API 统一版本化 `/api/v1`
 ## 快速开始
 
 ```bash
-python3.12 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+python3.12 -m venv .venv            # 只支持 Python 3.12（pyproject: >=3.12,<3.13）
+.venv/bin/pip install --require-hashes -r requirements-dev.lock   # 锁定版本 + 哈希校验
+.venv/bin/pip install --no-deps -e .                              # 装本项目本身（依赖已由锁文件装好）
 cd web && npm ci && npm run build && cd ..
 
 # SEC EDGAR 要求 User-Agent 带联系邮箱；不设置的话 M4 会直接报错（其他模块照常跑）
@@ -68,6 +69,21 @@ export MONEYFLOW_CONTACT_EMAIL=you@example.com
 # 启动 API（前端 dist 由 FastAPI 直接 serve）
 PYTHONPATH=src .venv/bin/python -m uvicorn moneyflow.api.main:app --host 127.0.0.1 --port 8000
 ```
+
+### 依赖锁定
+
+- `requirements.lock`：运行时依赖（生产 / VPS 用）；`requirements-dev.lock`：运行时 + 开发/测试依赖（本地和 CI 用）。
+  两份都由 `pyproject.toml` 生成，带 sha256 哈希、跨平台（`--universal`），目标 Python 3.12。
+- 改了 `pyproject.toml` 的依赖后重新生成（需要 [uv](https://docs.astral.sh/uv/)），并把两个锁文件一起提交：
+
+```bash
+uv pip compile pyproject.toml --universal --python-version 3.12 --generate-hashes -o requirements.lock
+uv pip compile pyproject.toml --extra dev --universal --python-version 3.12 --generate-hashes -o requirements-dev.lock
+```
+
+- 升级全部依赖：上面命令加 `--upgrade`。漏洞检查：`uvx pip-audit -r requirements-dev.lock --require-hashes --disable-pip`。
+- CI（`.github/workflows/ci.yml`）从 `requirements-dev.lock` 安装，跑 ruff、三遍 pytest（太平洋时间 / UTC / 时钟拨到周一，均断网）、
+  pip-audit，以及前端 `tsc` + build + `npm audit`。
 
 生产部署（VPS + systemd timer + 备份 + 冒烟清单）见 [`docs/DEPLOY.md`](docs/DEPLOY.md)。
 
