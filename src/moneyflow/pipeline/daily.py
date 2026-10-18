@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import typer
 
-from moneyflow.common.trading_day import is_trading_day, today_et
+from moneyflow.common.trading_day import calendar_warning, is_trading_day, today_et
 from moneyflow.services import cboe as m5_service
 from moneyflow.services import m2 as m2_service
 from moneyflow.services import m3 as m3_service
@@ -228,6 +228,9 @@ def _summarize(result: dict) -> list[str]:
 @app.command(name="run-all")
 def run_all_cmd() -> None:
     result = run_all(_engine())
+    warning = calendar_warning(result["today"])
+    if warning:
+        typer.echo(f"{result['today']}: CALENDAR WARNING: {warning}")
     if result["skipped"]:
         typer.echo(f"{result['today']}: not a trading day, writes skipped.")
         return

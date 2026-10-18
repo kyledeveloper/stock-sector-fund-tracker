@@ -87,3 +87,15 @@ def test_cli_exits_zero_when_all_ok(calls, tmp_path, monkeypatch):
     res = CliRunner().invoke(daily.app, ["run-all"])
     assert res.exit_code == 0, res.output
     assert "FAILED" not in res.output
+
+
+@freeze_time("2028-11-15 18:00:00")  # inside the 90-day calendar warning window
+def test_run_all_surfaces_calendar_warning(calls, tmp_path, monkeypatch):
+    from moneyflow.store.db import get_engine
+
+    engine = get_engine(tmp_path / "t.db")
+    monkeypatch.setattr(daily, "_engine", lambda: engine)
+    calls(set())
+    res = CliRunner().invoke(daily.app, ["run-all"])
+    assert res.exit_code == 0, res.output
+    assert "CALENDAR WARNING" in res.output
