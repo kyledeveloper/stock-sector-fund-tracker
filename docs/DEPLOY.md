@@ -49,8 +49,10 @@ ExecStart=/home/moneyflow/stock-sector-fund-tracker/.venv/bin/python -m moneyflo
 Description=Daily money-flow pipeline (after US close)
 
 [Timer]
-# 每天 15:05 PDT = 18:05 EDT（美东收盘后 2 小时，CBOE daily 页已发布）
-OnCalendar=*-*-* 15:05:00
+# 每天美西 15:30 = 美东 18:30（收盘后 2.5 小时，CBOE daily 页已发布）。
+# 显式写时区：服务器本地时区不是美西时也不会提前跑；夏令时由 systemd 自动处理。
+# 与 systemd/moneyflow-daily.timer 保持一致。
+OnCalendar=America/Los_Angeles *-*-* 15:30:00
 Persistent=true
 
 [Install]
