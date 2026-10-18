@@ -54,6 +54,9 @@ python3.12 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 cd web && npm ci && npm run build && cd ..
 
+# SEC EDGAR 要求 User-Agent 带联系邮箱；不设置的话 M4 会直接报错（其他模块照常跑）
+export MONEYFLOW_CONTACT_EMAIL=you@example.com
+
 # 每日 pipeline（幂等，可单独重跑）：m2 → m3 → m4 → m5
 .venv/bin/python -m moneyflow.pipeline.daily run-all
 

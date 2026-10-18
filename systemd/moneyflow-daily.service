@@ -16,5 +16,8 @@ After=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=%h/stock-sector-fund-tracker
+# Runtime config, e.g. MONEYFLOW_CONTACT_EMAIL=you@example.com (SEC requires a
+# contact email in the User-Agent; M4 fails loud without it). Optional file.
+EnvironmentFile=-%h/.config/moneyflow/env
 Environment=PYTHONPATH=%h/stock-sector-fund-tracker/src
 ExecStart=%h/stock-sector-fund-tracker/.venv/bin/python -m moneyflow.pipeline.daily run-all
