@@ -32,6 +32,17 @@ cd web && npm ci && npm run build && cd ..
 仓库里的 `systemd/moneyflow-daily.service` 和 `systemd/moneyflow-daily.timer` 是**用户级** unit，
 以部署用户身份运行，不需要 root，也不需要单独建 `moneyflow` 系统用户。以仓库里的文件为准，不要在这里另抄一份。
 
+先建运行时配置文件。SEC EDGAR 要求 User-Agent 带联系邮箱，`moneyflow-daily.service` 通过
+`EnvironmentFile=-%h/.config/moneyflow/env` 读取；不设置的话每天 M4 都会失败（其他模块照常跑）。
+请填真实可联系的邮箱，不要用 `example.com` 这类占位地址。
+
+```bash
+mkdir -p ~/.config/moneyflow
+install -m 600 /dev/null ~/.config/moneyflow/env    # 先建好并设成 600，再写入
+echo 'MONEYFLOW_CONTACT_EMAIL=你的邮箱@域名' >> ~/.config/moneyflow/env
+ls -l ~/.config/moneyflow/env                       # 应显示 -rw-------
+```
+
 ```bash
 # 1) 安装用户级 unit
 mkdir -p ~/.config/systemd/user
@@ -65,8 +76,6 @@ API 服务（可选常驻，供前端/矩阵产品调用），同样做成用户
 # ~/.config/systemd/user/moneyflow-api.service
 [Unit]
 Description=US Money Flow API
-Wants=network-online.target
-After=network-online.target
 
 [Service]
 Type=simple
@@ -120,5 +129,6 @@ find ~/backups -name 'moneyflow-*.db' -mtime +7 -delete
 - [ ] `run-all` 全绿；`/api/v1/freshness` 四个模块 m2–m5 均有 `as_of`
 - [ ] 前端 `npm run build` 产物存在；打开页面四个面板（敞口/动量/机构与内幕/期权情绪）均有数据或诚实的"暂无数据"
 - [ ] systemd timer dry-run：`systemctl --user start moneyflow-daily.service` 一次性验证，日志干净后再 `systemctl --user enable --now moneyflow-daily.timer`
+- [ ] `~/.config/moneyflow/env` 存在、权限 600、含 `MONEYFLOW_CONTACT_EMAIL`；`run-all` 日志里 M4 没有缺邮箱的报错
 - [ ] `loginctl show-user "$USER" --property=Linger` 显示 `Linger=yes`（退出登录后 timer 仍会触发）
 - [ ] 非交易日跑 `run-all`：返回 skipped，不写新行（防周五数据记到周六）
