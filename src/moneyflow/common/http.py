@@ -6,9 +6,10 @@ must go through here, never raw httpx. SEC callers use sec_client(),
 which refuses to run without MONEYFLOW_CONTACT_EMAIL (Auditor P1 #5).
 
 Retries (Auditor P1 #6): 429/5xx honor Retry-After (seconds or HTTP-date),
-otherwise exponential backoff; jitter is added, each wait is capped at
-max_backoff_s, and the whole call gives up once the next wait would push
-total waiting past max_total_wait_s.
+otherwise exponential backoff; jitter is added and exponential waits are
+capped at max_backoff_s. A server Retry-After above max_backoff_s means give
+up immediately: retrying early can extend an SEC block. The whole call also
+gives up once the next wait would push total waiting past max_total_wait_s.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ import httpx
 DEFAULT_UA = "us-moneyflow/0.1 (+https://github.com/kyledeveloper; personal research tool)"
 CONTACT_ENV = "MONEYFLOW_CONTACT_EMAIL"
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# RFC 2606 reserved names (README placeholder is you@example.com).
+_PLACEHOLDER_DOMAIN = re.compile(r"(^|\.)example\.(com|org|net)$|(^|\.)(example|invalid|test)$")
 
 # Conservative default: well under SEC's 10 req/s and typical site limits.
 DEFAULT_MIN_INTERVAL_S = 0.5
@@ -39,7 +42,8 @@ class SecContactMissing(RuntimeError):
 
 def sec_user_agent() -> str:
     email = os.environ.get(CONTACT_ENV, "").strip()
-    if not _EMAIL.match(email):
+    domain = email.rsplit("@", 1)[-1].lower()
+    if not _EMAIL.match(email) or _PLACEHOLDER_DOMAIN.search(domain):
         raise SecContactMissing(
             f"set {CONTACT_ENV} to a real contact email before pulling SEC EDGAR "
             "(SEC fair-access policy requires it in the User-Agent)"
@@ -52,7 +56,7 @@ def _retry_after_s(resp: httpx.Response) -> float | None:
     if raw is None:
         return None
     raw = raw.strip()
-    if raw.isdigit():
+    if raw.isascii() and raw.isdigit():
         return float(raw)
     try:
         when = parsedate_to_datetime(raw)
@@ -97,10 +101,14 @@ class PoliteClient:
         if elapsed < self._min_interval_s:
             self._sleep(self._min_interval_s - elapsed)
 
-    def _backoff(self, attempt: int, resp: httpx.Response | None) -> float:
+    def _backoff(self, attempt: int, resp: httpx.Response | None) -> float | None:
+        """Seconds to wait before the next attempt, or None to give up now."""
         hinted = _retry_after_s(resp) if resp is not None else None
-        base = hinted if hinted is not None else float(2**attempt)
-        return min(base + self._jitter(), self._max_backoff_s)
+        if hinted is not None:
+            if hinted > self._max_backoff_s:
+                return None  # server asked for longer than we will wait
+            return hinted + self._jitter()
+        return min(float(2**attempt) + self._jitter(), self._max_backoff_s)
 
     def get(self, url: str, **kwargs) -> httpx.Response:
         last_exc: httpx.HTTPError | None = None
@@ -121,7 +129,7 @@ class PoliteClient:
             if attempt == self._max_retries - 1:
                 break
             delay = self._backoff(attempt, last_resp)
-            if waited + delay > self._max_total_wait_s:
+            if delay is None or waited + delay > self._max_total_wait_s:
                 break
             self._sleep(delay)
             waited += delay
