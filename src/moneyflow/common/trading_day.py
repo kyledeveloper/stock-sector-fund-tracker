@@ -9,6 +9,7 @@ All dates are America/New_York calendar days.
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -54,6 +55,8 @@ NYSE_HOLIDAYS: frozenset[date] = frozenset(
 
 # Last date the holiday table is known to cover. Extend the table and this
 # date together (cross-check against exchange_calendars XNYS).
+_log = logging.getLogger(__name__)
+
 CALENDAR_END = date(2028, 12, 31)
 CALENDAR_WARN_DAYS = 90
 
@@ -102,7 +105,13 @@ def is_stale(as_of: date | None, today: date) -> bool:
         return True
     if as_of > today:
         return True
-    return as_of < last_trading_day_before(today)
+    try:
+        return as_of < last_trading_day_before(today)
+    except CalendarExhausted as exc:
+        # Read path: degrade to stale rather than 500 the API; the pipeline
+        # (is_trading_day in run-all) still fails loud.
+        _log.warning("freshness unknown, reporting stale: %s", exc)
+        return True
 
 
 def today_et() -> date:

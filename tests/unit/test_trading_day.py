@@ -97,3 +97,15 @@ def test_days_left_and_warning_window():
     assert td.calendar_warning(date(2026, 10, 18)) is None
     msg = td.calendar_warning(td.CALENDAR_END - timedelta(days=30))
     assert msg is not None and "30 days" in msg
+
+
+def test_is_stale_past_calendar_end_reports_stale_instead_of_raising(caplog):
+    """Auditor low #5: read paths (API freshness/sentiment) must degrade to
+    stale, not 500, once the holiday table runs out. The pipeline still
+    fails loud via is_trading_day."""
+    from moneyflow.common import trading_day as td
+
+    after = td.CALENDAR_END + timedelta(days=10)
+    with caplog.at_level("WARNING", logger="moneyflow.common.trading_day"):
+        assert td.is_stale(after - timedelta(days=1), after) is True
+    assert "CALENDAR_END" in caplog.text
