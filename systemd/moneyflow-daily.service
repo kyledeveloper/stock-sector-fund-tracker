@@ -10,8 +10,7 @@
 # and add User=/Group=.)
 [Unit]
 Description=US Money Flow Tracker - daily pipeline
-Wants=network-online.target
-After=network-online.target
+# No network-online.target: it has no effect in a user-level unit.
 
 [Service]
 Type=oneshot

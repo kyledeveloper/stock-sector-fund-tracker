@@ -28,7 +28,9 @@ DEFAULT_UA = "us-moneyflow/0.1 (+https://github.com/kyledeveloper; personal rese
 CONTACT_ENV = "MONEYFLOW_CONTACT_EMAIL"
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # RFC 2606 reserved names (README placeholder is you@example.com).
-_PLACEHOLDER_DOMAIN = re.compile(r"(^|\.)example\.(com|org|net)$|(^|\.)(example|invalid|test)$")
+_PLACEHOLDER_DOMAIN = re.compile(
+    r"(^|\.)example\.(com|org|net)$|(^|\.)(example|invalid|test|localhost)$"
+)
 
 # Conservative default: well under SEC's 10 req/s and typical site limits.
 DEFAULT_MIN_INTERVAL_S = 0.5
@@ -42,7 +44,7 @@ class SecContactMissing(RuntimeError):
 
 def sec_user_agent() -> str:
     email = os.environ.get(CONTACT_ENV, "").strip()
-    domain = email.rsplit("@", 1)[-1].lower()
+    domain = email.rsplit("@", 1)[-1].lower().rstrip(".")
     if not _EMAIL.match(email) or _PLACEHOLDER_DOMAIN.search(domain):
         raise SecContactMissing(
             f"set {CONTACT_ENV} to a real contact email before pulling SEC EDGAR "

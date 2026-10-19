@@ -106,6 +106,18 @@ def test_is_stale_past_calendar_end_reports_stale_instead_of_raising(caplog):
     from moneyflow.common import trading_day as td
 
     after = td.CALENDAR_END + timedelta(days=10)
+    td._exhausted_warned = False
     with caplog.at_level("WARNING", logger="moneyflow.common.trading_day"):
         assert td.is_stale(after - timedelta(days=1), after) is True
     assert "CALENDAR_END" in caplog.text
+
+
+def test_is_stale_exhaustion_warning_logged_once_not_per_request(caplog, monkeypatch):
+    from moneyflow.common import trading_day as td
+
+    monkeypatch.setattr(td, "_exhausted_warned", False)
+    after = td.CALENDAR_END + timedelta(days=10)
+    with caplog.at_level("WARNING", logger="moneyflow.common.trading_day"):
+        for _ in range(5):
+            assert td.is_stale(after - timedelta(days=1), after) is True
+    assert len([r for r in caplog.records if r.levelname == "WARNING"]) == 1

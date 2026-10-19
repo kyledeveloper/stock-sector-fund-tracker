@@ -14,6 +14,8 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
+_log = logging.getLogger(__name__)
+_exhausted_warned = False  # read-path warning is logged once per process
 
 # NYSE holidays, observed dates. Source: NYSE calendar.
 NYSE_HOLIDAYS: frozenset[date] = frozenset(
@@ -55,8 +57,6 @@ NYSE_HOLIDAYS: frozenset[date] = frozenset(
 
 # Last date the holiday table is known to cover. Extend the table and this
 # date together (cross-check against exchange_calendars XNYS).
-_log = logging.getLogger(__name__)
-
 CALENDAR_END = date(2028, 12, 31)
 CALENDAR_WARN_DAYS = 90
 
@@ -110,7 +110,10 @@ def is_stale(as_of: date | None, today: date) -> bool:
     except CalendarExhausted as exc:
         # Read path: degrade to stale rather than 500 the API; the pipeline
         # (is_trading_day in run-all) still fails loud.
-        _log.warning("freshness unknown, reporting stale: %s", exc)
+        global _exhausted_warned
+        if not _exhausted_warned:
+            _exhausted_warned = True
+            _log.warning("freshness unknown, reporting stale: %s", exc)
         return True
 
 

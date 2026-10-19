@@ -196,7 +196,17 @@ def test_sec_user_agent_rejects_non_email(monkeypatch):
         http_mod.sec_user_agent()
 
 
-@pytest.mark.parametrize("email", ["you@example.com", "a@example.org", "b@sub.example.net"])
+@pytest.mark.parametrize(
+    "email",
+    [
+        "you@example.com",
+        "you@example.com.",
+        "a@example.org",
+        "b@sub.example.net",
+        "c@box.localhost",
+        "d@EXAMPLE.COM",
+    ],
+)
 def test_sec_user_agent_rejects_placeholder_example_domains(monkeypatch, email):
     """Auditor low #6: README's placeholder must not pass as a real contact."""
     monkeypatch.setenv("MONEYFLOW_CONTACT_EMAIL", email)
