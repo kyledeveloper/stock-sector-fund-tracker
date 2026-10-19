@@ -56,7 +56,7 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q faketime
 
       - name: pytest (clock = Monday 2026-10-19 10:00 ET)
-        run: faketime '2026-10-19 10:00:00' pytest -q
+        run: faketime -f '@2026-10-19 10:00:00' pytest -q
         env:
           TZ: America/New_York
 
