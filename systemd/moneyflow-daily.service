@@ -1,6 +1,11 @@
 # Intended as a USER-level systemd unit: install to ~/.config/systemd/user/
 # on the VPS, then `systemctl --user enable --now moneyflow-daily.timer`.
-# %h expands to the deploying user's home -- no hardcoded paths.
+# %h expands to the deploying user's home. Paths assume the default clone
+# location: git clone https://github.com/kyledeveloper/stock-sector-fund-tracker ~/stock-sector-fund-tracker
+# Cloned elsewhere? Override without editing this file:
+#   systemctl --user edit moneyflow-daily.service
+# then set WorkingDirectory=, Environment=PYTHONPATH=... and ExecStart= (clear it
+# first with an empty ExecStart= line) to your clone path.
 # (For a system-wide unit instead, replace %h with the absolute repo path
 # and add User=/Group=.)
 [Unit]
@@ -10,6 +15,6 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/workspace/us-moneyflow
-Environment=PYTHONPATH=%h/workspace/us-moneyflow/src
-ExecStart=%h/workspace/us-moneyflow/.venv/bin/python -m moneyflow.pipeline.daily run-all
+WorkingDirectory=%h/stock-sector-fund-tracker
+Environment=PYTHONPATH=%h/stock-sector-fund-tracker/src
+ExecStart=%h/stock-sector-fund-tracker/.venv/bin/python -m moneyflow.pipeline.daily run-all
