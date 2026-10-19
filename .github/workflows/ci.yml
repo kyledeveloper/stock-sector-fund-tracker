@@ -1,7 +1,9 @@
 name: CI
 
 on:
+  # push only on main; branches are covered by pull_request, so same-repo PRs run once.
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -22,6 +24,8 @@ jobs:
       PYTEST_ADDOPTS: "--disable-socket --allow-unix-socket -p no:cacheprovider"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -36,7 +40,9 @@ jobs:
           pip install --no-deps -e .
 
       - name: Ruff
-        run: ruff check .
+        run: |
+          ruff check .
+          ruff format --check .
 
       - name: pytest (America/Los_Angeles)
         run: pytest -q
@@ -74,6 +80,8 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -89,14 +97,7 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Blocking gate: runtime (shipped) dependencies, high or worse.
-      - name: npm audit (production deps, blocking)
-        run: npm audit --omit=dev --audit-level=high
-
-      # Non-blocking until the pending frontend upgrades land:
-      #  - vite <=6.4.2 (high; dev server only, not shipped) + esbuild <=0.24.2 (moderate)
-      #  - echarts <6.1.0 XSS GHSA-fgmj-fm8m-jvvx (moderate; Dev's echarts 6.x upgrade, plan phase 1)
-      # Remove continue-on-error once those upgrades are merged.
-      - name: npm audit (all deps, non-blocking)
-        run: npm audit --audit-level=high
-        continue-on-error: true
+      # Blocking gate: every dependency (runtime and dev), any severity.
+      # Was 0 after the vite 6.4.4 / esbuild 0.25 / echarts 6.1 upgrades in phase 1.
+      - name: npm audit (all deps, blocking)
+        run: npm audit
