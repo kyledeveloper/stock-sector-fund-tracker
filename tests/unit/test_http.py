@@ -38,3 +38,177 @@ def test_retries_then_raises_on_persistent_500():
     except httpx.HTTPStatusError:
         pass
     assert len(calls) == 3  # max_retries
+
+
+# --- Auditor P1 #5/#6: configurable SEC contact UA, Retry-After, jitter, caps ---
+
+from datetime import UTC, datetime, timedelta  # noqa: E402
+from email.utils import format_datetime  # noqa: E402
+
+import pytest  # noqa: E402
+
+from moneyflow.common import http as http_mod  # noqa: E402
+
+
+def _sleepy_client(handler, **kw):
+    slept: list[float] = []
+    c = PoliteClient(
+        min_interval_s=0,
+        trust_env=False,
+        transport=httpx.MockTransport(handler),
+        sleep=slept.append,
+        jitter=lambda: 0.0,
+        **kw,
+    )
+    return c, slept
+
+
+def _seq(*responses):
+    it = iter(responses)
+    return lambda request: next(it)
+
+
+def test_retry_after_seconds_is_honored():
+    c, slept = _sleepy_client(
+        _seq(httpx.Response(429, headers={"Retry-After": "7"}), httpx.Response(200, text="ok"))
+    )
+    assert c.get("https://example.com").status_code == 200
+    assert slept == [7.0]
+
+
+def test_retry_after_http_date_is_honored():
+    when = datetime.now(UTC) + timedelta(seconds=30)
+    hdr = format_datetime(when, usegmt=True)
+    c, slept = _sleepy_client(
+        _seq(httpx.Response(503, headers={"Retry-After": hdr}), httpx.Response(200, text="ok"))
+    )
+    c.get("https://example.com")
+    assert len(slept) == 1 and 25 <= slept[0] <= 31
+
+
+def test_retry_after_beyond_per_wait_cap_gives_up_instead_of_retrying_early():
+    """Auditor P1 re-review #2: retrying before the server's Retry-After can
+    extend an SEC block, so a hint above max_backoff_s means give up now."""
+    seen: list[int] = []
+
+    def handler(request):
+        seen.append(1)
+        return httpx.Response(429, headers={"Retry-After": "3600"})
+
+    c, slept = _sleepy_client(handler, max_backoff_s=60)
+    with pytest.raises(httpx.HTTPStatusError):
+        c.get("https://example.com")
+    assert slept == []
+    assert len(seen) == 1
+
+
+def test_retry_after_within_cap_is_honored():
+    c, slept = _sleepy_client(
+        _seq(httpx.Response(429, headers={"Retry-After": "30"}), httpx.Response(200, text="ok")),
+        max_backoff_s=60,
+    )
+    c.get("https://example.com")
+    assert slept == [30.0]
+
+
+def test_exponential_backoff_still_capped_per_wait():
+    c, slept = _sleepy_client(
+        _seq(httpx.Response(503), httpx.Response(503), httpx.Response(200, text="ok")),
+        max_backoff_s=1.5,
+    )
+    c.get("https://example.com")
+    assert slept == [1.0, 1.5]
+
+
+def test_non_ascii_digit_retry_after_does_not_crash():
+    """Auditor low #4: '\u00b2'.isdigit() is True but float() rejects it."""
+    c, slept = _sleepy_client(
+        _seq(
+            httpx.Response(429, headers={"Retry-After": "\u00b2".encode("latin-1")}),
+            httpx.Response(200, text="ok"),
+        )
+    )
+    c.get("https://example.com")
+    assert slept == [1.0]
+
+
+def test_garbage_retry_after_falls_back_to_exponential():
+    c, slept = _sleepy_client(
+        _seq(
+            httpx.Response(429, headers={"Retry-After": "soon"}),
+            httpx.Response(429),
+            httpx.Response(200, text="ok"),
+        )
+    )
+    c.get("https://example.com")
+    assert slept == [1.0, 2.0]
+
+
+def test_jitter_is_added_to_backoff():
+    slept: list[float] = []
+    c = PoliteClient(
+        min_interval_s=0,
+        trust_env=False,
+        transport=httpx.MockTransport(_seq(httpx.Response(500), httpx.Response(200))),
+        sleep=slept.append,
+        jitter=lambda: 0.25,
+    )
+    c.get("https://example.com")
+    assert slept == [1.25]
+
+
+def test_total_retry_budget_stops_early():
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(429, headers={"Retry-After": "50"})
+
+    c, slept = _sleepy_client(handler, max_retries=5, max_total_wait_s=80)
+    with pytest.raises(httpx.HTTPStatusError):
+        c.get("https://example.com")
+    assert sum(slept) <= 80
+    assert len(calls) == 2  # second wait of 50s would exceed the 80s budget
+
+
+def test_no_sleep_after_final_attempt():
+    c, slept = _sleepy_client(lambda r: httpx.Response(500), max_retries=3)
+    with pytest.raises(httpx.HTTPStatusError):
+        c.get("https://example.com")
+    assert slept == [1.0, 2.0]  # 3 attempts, 2 waits between them
+
+
+def test_sec_user_agent_includes_contact_email(monkeypatch):
+    monkeypatch.setenv("MONEYFLOW_CONTACT_EMAIL", "ops@moneyflow-research.dev")
+    ua = http_mod.sec_user_agent()
+    assert "us-moneyflow" in ua and "ops@moneyflow-research.dev" in ua
+
+
+def test_sec_user_agent_without_email_fails_loud(monkeypatch):
+    monkeypatch.delenv("MONEYFLOW_CONTACT_EMAIL", raising=False)
+    with pytest.raises(http_mod.SecContactMissing, match="MONEYFLOW_CONTACT_EMAIL"):
+        http_mod.sec_user_agent()
+
+
+def test_sec_user_agent_rejects_non_email(monkeypatch):
+    monkeypatch.setenv("MONEYFLOW_CONTACT_EMAIL", "not-an-email")
+    with pytest.raises(http_mod.SecContactMissing):
+        http_mod.sec_user_agent()
+
+
+@pytest.mark.parametrize(
+    "email",
+    [
+        "you@example.com",
+        "you@example.com.",
+        "a@example.org",
+        "b@sub.example.net",
+        "c@box.localhost",
+        "d@EXAMPLE.COM",
+    ],
+)
+def test_sec_user_agent_rejects_placeholder_example_domains(monkeypatch, email):
+    """Auditor low #6: README's placeholder must not pass as a real contact."""
+    monkeypatch.setenv("MONEYFLOW_CONTACT_EMAIL", email)
+    with pytest.raises(http_mod.SecContactMissing):
+        http_mod.sec_user_agent()

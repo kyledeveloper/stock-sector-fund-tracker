@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from moneyflow.common.http import PoliteClient
+from moneyflow.common.http import PoliteClient, sec_client
 from moneyflow.common.trading_day import today_et
 from moneyflow.compute.filing_diff import diff_13f
 from moneyflow.ingest.edgar import fetch_13f_holdings, peek_latest_13f
@@ -37,7 +37,7 @@ FORM4_HARD_CAP = 10000  # above: fail loud, true upstream drift (M6)
 
 def run_13f(engine, client: PoliteClient | None = None) -> dict:
     own = client is None
-    client = client or PoliteClient()
+    client = client or sec_client()
     try:
         session = SessionLocal(bind=engine)
         try:
@@ -165,7 +165,7 @@ def run_form4(
     end = end or today_et()
     start = end - timedelta(days=days)
     own = client is None
-    client = client or PoliteClient()
+    client = client or sec_client()
     try:
         hits = search_form4(start, end, client)
         if len(hits) > FORM4_HARD_CAP:

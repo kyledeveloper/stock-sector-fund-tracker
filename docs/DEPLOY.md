@@ -29,58 +29,66 @@ cd web && npm ci && npm run build && cd ..
 
 `run-all` = m2 → m3 → m4 → m5，全幂等；非交易日只 bump `checked_at` 不写数据。
 
-`/etc/systemd/system/moneyflow.service`：
-```ini
-[Unit]
-Description=US Money Flow daily pipeline
-After=network-online.target
+仓库里的 `systemd/moneyflow-daily.service` 和 `systemd/moneyflow-daily.timer` 是**用户级** unit，
+以部署用户身份运行，不需要 root，也不需要单独建 `moneyflow` 系统用户。以仓库里的文件为准，不要在这里另抄一份。
 
-[Service]
-Type=oneshot
-User=moneyflow
-WorkingDirectory=/home/moneyflow/stock-sector-fund-tracker
-ExecStart=/home/moneyflow/stock-sector-fund-tracker/.venv/bin/python -m moneyflow.pipeline.daily run-all
-# 日志进 journal：journalctl -u moneyflow.service
-```
+先建运行时配置文件。SEC EDGAR 要求 User-Agent 带联系邮箱，`moneyflow-daily.service` 通过
+`EnvironmentFile=-%h/.config/moneyflow/env` 读取；不设置的话每天 M4 都会失败（其他模块照常跑）。
+请填真实可联系的邮箱，不要用 `example.com` 这类占位地址。
 
-`/etc/systemd/system/moneyflow.timer`：
-```ini
-[Unit]
-Description=Daily money-flow pipeline (after US close)
-
-[Timer]
-# 每天美西 15:30 = 美东 18:30（收盘后 2.5 小时，CBOE daily 页已发布）。
-# 显式写时区：服务器本地时区不是美西时也不会提前跑；夏令时由 systemd 自动处理。
-# 与 systemd/moneyflow-daily.timer 保持一致。
-OnCalendar=America/Los_Angeles *-*-* 15:30:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
+```bash
+mkdir -p ~/.config/moneyflow
+install -m 600 /dev/null ~/.config/moneyflow/env    # 先建好并设成 600，再写入
+echo 'MONEYFLOW_CONTACT_EMAIL=你的邮箱@域名' >> ~/.config/moneyflow/env
+ls -l ~/.config/moneyflow/env                       # 应显示 -rw-------
 ```
 
 ```bash
-sudo systemctl daemon-reload
-# 先 dry-run 一次 service（不等 timer）：确认日志干净再 enable timer
-sudo systemctl start moneyflow.service
-journalctl -u moneyflow.service -n 50   # 检查 run-all 全绿
-sudo systemctl enable --now moneyflow.timer
-systemctl list-timers moneyflow.timer   # 确认
+# 1) 安装用户级 unit
+mkdir -p ~/.config/systemd/user
+cp ~/stock-sector-fund-tracker/systemd/moneyflow-daily.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+
+# 2) 允许用户退出登录后定时任务照常运行（必须做，否则 SSH 断开后 timer 不会触发）
+sudo loginctl enable-linger "$USER"
+loginctl show-user "$USER" --property=Linger   # 应显示 Linger=yes
+
+# 3) 先手动跑一次 service（不等 timer），确认日志干净再启用 timer
+systemctl --user start moneyflow-daily.service
+journalctl --user -u moneyflow-daily.service -n 50   # 检查 run-all 全绿
+systemctl --user enable --now moneyflow-daily.timer
+systemctl --user list-timers moneyflow-daily.timer   # 确认下次触发时间
 ```
 
-API 服务（可选常驻，供前端/矩阵产品调用）：
+触发时间见 `systemd/moneyflow-daily.timer`：
 ```ini
-# /etc/systemd/system/moneyflow-api.service
+# 每天美西 15:30 = 美东 18:30（收盘后 2.5 小时，CBOE daily 页已发布）。
+# 显式写时区：服务器本地时区不是美西时也不会提前跑；夏令时由 systemd 自动处理。
+OnCalendar=America/Los_Angeles *-*-* 15:30:00
+Persistent=true
+```
+
+clone 到了别的目录：不要改仓库里的文件，用 `systemctl --user edit moneyflow-daily.service`
+写 drop-in 覆盖路径（用法见 unit 文件头部注释）。
+
+API 服务（可选常驻，供前端/矩阵产品调用），同样做成用户级 unit：
+```ini
+# ~/.config/systemd/user/moneyflow-api.service
 [Unit]
 Description=US Money Flow API
-After=network-online.target
 
 [Service]
 Type=simple
-User=moneyflow
-WorkingDirectory=/home/moneyflow/stock-sector-fund-tracker
-ExecStart=/home/moneyflow/stock-sector-fund-tracker/.venv/bin/uvicorn moneyflow.api.main:app --host 127.0.0.1 --port 8000
+WorkingDirectory=%h/stock-sector-fund-tracker
+Environment=PYTHONPATH=%h/stock-sector-fund-tracker/src
+ExecStart=%h/stock-sector-fund-tracker/.venv/bin/uvicorn moneyflow.api.main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+```bash
+systemctl --user daemon-reload && systemctl --user enable --now moneyflow-api.service
 ```
 前端 `web/dist` 已由 FastAPI 直接 serve（`WEB_DIST` 存在即挂载），单服务即可。
 
@@ -93,9 +101,10 @@ Restart=on-failure
 
 ```bash
 # 每日一次（cron 或另一个 timer），保留 7 天
-sqlite3 /home/moneyflow/stock-sector-fund-tracker/data/moneyflow.db \
-  ".backup '/home/moneyflow/backups/moneyflow-$(date +%F).db'"
-find /home/moneyflow/backups -name 'moneyflow-*.db' -mtime +7 -delete
+mkdir -p ~/backups
+sqlite3 ~/stock-sector-fund-tracker/data/moneyflow.db \
+  ".backup '$HOME/backups/moneyflow-$(date +%F).db'"
+find ~/backups -name 'moneyflow-*.db' -mtime +7 -delete
 ```
 `.backup` 是在线热备，WAL 下安全。恢复：停掉 timer/api，把备份文件拷回 `data/moneyflow.db`。
 
@@ -119,5 +128,7 @@ find /home/moneyflow/backups -name 'moneyflow-*.db' -mtime +7 -delete
 - [ ] CBOE 连通性：单页抓取 200（`m5` 命令一次）
 - [ ] `run-all` 全绿；`/api/v1/freshness` 四个模块 m2–m5 均有 `as_of`
 - [ ] 前端 `npm run build` 产物存在；打开页面四个面板（敞口/动量/机构与内幕/期权情绪）均有数据或诚实的"暂无数据"
-- [ ] systemd timer dry-run：`systemctl start moneyflow.service` 一次性验证，日志干净后再 `enable --now` timer
+- [ ] systemd timer dry-run：`systemctl --user start moneyflow-daily.service` 一次性验证，日志干净后再 `systemctl --user enable --now moneyflow-daily.timer`
+- [ ] `~/.config/moneyflow/env` 存在、权限 600、含 `MONEYFLOW_CONTACT_EMAIL`；`run-all` 日志里 M4 没有缺邮箱的报错
+- [ ] `loginctl show-user "$USER" --property=Linger` 显示 `Linger=yes`（退出登录后 timer 仍会触发）
 - [ ] 非交易日跑 `run-all`：返回 skipped，不写新行（防周五数据记到周六）

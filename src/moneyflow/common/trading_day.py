@@ -2,16 +2,20 @@
 
 The timer fires every day, but writes only happen on trading days --
 this module is the gate that stops Friday's data being filed under
-Saturday's date. Static NYSE holiday list; extend each December.
+Saturday's date. Static NYSE holiday list through CALENDAR_END; past it
+is_trading_day() raises, and the pipeline warns 90 days ahead (Auditor P1 #3).
 All dates are America/New_York calendar days.
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
+_log = logging.getLogger(__name__)
+_exhausted_warned = False  # read-path warning is logged once per process
 
 # NYSE holidays, observed dates. Source: NYSE calendar.
 NYSE_HOLIDAYS: frozenset[date] = frozenset(
@@ -38,12 +42,50 @@ NYSE_HOLIDAYS: frozenset[date] = frozenset(
         date(2027, 9, 6),  # Labor Day
         date(2027, 11, 25),  # Thanksgiving
         date(2027, 12, 24),  # Christmas (observed)
+        # 2028 (Jan 1 is a Saturday: NYSE does not observe it on Fri 2027-12-31)
+        date(2028, 1, 17),  # Martin Luther King Jr. Day
+        date(2028, 2, 21),  # Presidents' Day
+        date(2028, 4, 14),  # Good Friday
+        date(2028, 5, 29),  # Memorial Day
+        date(2028, 6, 19),  # Juneteenth
+        date(2028, 7, 4),  # Independence Day
+        date(2028, 9, 4),  # Labor Day
+        date(2028, 11, 23),  # Thanksgiving
+        date(2028, 12, 25),  # Christmas
     }
 )
+
+# Last date the holiday table is known to cover. Extend the table and this
+# date together (cross-check against exchange_calendars XNYS).
+CALENDAR_END = date(2028, 12, 31)
+CALENDAR_WARN_DAYS = 90
+
+
+class CalendarExhausted(RuntimeError):
+    """The static holiday table does not cover the requested date."""
+
+
+def calendar_days_left(today: date) -> int:
+    return (CALENDAR_END - today).days
+
+
+def calendar_warning(today: date) -> str | None:
+    left = calendar_days_left(today)
+    if left > CALENDAR_WARN_DAYS:
+        return None
+    return (
+        f"NYSE holiday table ends {CALENDAR_END} ({left} days left): "
+        "extend NYSE_HOLIDAYS and CALENDAR_END in common/trading_day.py"
+    )
 
 
 def is_trading_day(d: date) -> bool:
     """True for Mon-Fri that is not an NYSE holiday."""
+    if d > CALENDAR_END:
+        raise CalendarExhausted(
+            f"{d} is past CALENDAR_END {CALENDAR_END}: extend NYSE_HOLIDAYS "
+            "(silently guessing would mis-file holidays as trading days)"
+        )
     return d.weekday() < 5 and d not in NYSE_HOLIDAYS
 
 
@@ -63,7 +105,16 @@ def is_stale(as_of: date | None, today: date) -> bool:
         return True
     if as_of > today:
         return True
-    return as_of < last_trading_day_before(today)
+    try:
+        return as_of < last_trading_day_before(today)
+    except CalendarExhausted as exc:
+        # Read path: degrade to stale rather than 500 the API; the pipeline
+        # (is_trading_day in run-all) still fails loud.
+        global _exhausted_warned
+        if not _exhausted_warned:
+            _exhausted_warned = True
+            _log.warning("freshness unknown, reporting stale: %s", exc)
+        return True
 
 
 def today_et() -> date:

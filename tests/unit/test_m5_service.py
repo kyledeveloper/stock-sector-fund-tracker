@@ -195,3 +195,24 @@ def test_backfill_marks_freshness(engine):
     latest = max(r.trade_date for r in repo.series(365))
     assert rec[0] == latest
     assert rec[1] is not None  # checked_at bumped
+
+
+@pytest.mark.parametrize(
+    ("now_utc", "expected"),
+    [
+        ("2027-01-19 18:00:00", "2027-01-15"),  # Tue after MLK Day -> prior Friday
+        ("2026-09-08 18:00:00", "2026-09-04"),  # Tue after Labor Day
+        ("2026-10-19 18:00:00", "2026-10-16"),  # plain Monday
+    ],
+)
+def test_run_m5_default_date_skips_weekends_and_holidays(engine, now_utc, expected):
+    """Auditor follow-up: the daily path uses trading days, not a calendar window."""
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(request.url.params["dt"])
+        return httpx.Response(200, text=SAMPLE)
+
+    with freeze_time(now_utc):
+        m5_service.run_m5(engine, client=_mock_client(handler))
+    assert requested == [expected]

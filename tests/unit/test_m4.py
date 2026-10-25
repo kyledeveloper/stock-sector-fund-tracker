@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import httpx
+import pytest
 from sqlalchemy import create_engine
 
 from moneyflow.common.http import PoliteClient
@@ -802,3 +803,20 @@ def test_delete_quarter_does_not_commit_alone(tmp_path):
         assert len(repo.for_quarter("0001649339", date(2026, 3, 31))) == 1
     finally:
         session.close()
+
+
+def test_run_13f_default_client_requires_sec_contact(monkeypatch, tmp_path):
+    """Auditor P1 #5: without a contact email the SEC pull fails loud,
+    before any request goes out with a non-compliant User-Agent."""
+    from moneyflow.common.http import SecContactMissing
+    from moneyflow.services import m4 as m4_service
+    from moneyflow.store.db import get_engine
+    from moneyflow.store.migrate import apply_migrations
+
+    monkeypatch.delenv("MONEYFLOW_CONTACT_EMAIL", raising=False)
+    engine = get_engine(tmp_path / "t.db")
+    apply_migrations(engine)
+    with pytest.raises(SecContactMissing):
+        m4_service.run_13f(engine)
+    with pytest.raises(SecContactMissing):
+        m4_service.run_form4(engine)

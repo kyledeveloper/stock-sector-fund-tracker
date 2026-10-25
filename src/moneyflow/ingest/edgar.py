@@ -24,7 +24,7 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import date
 
-from moneyflow.common.http import DEFAULT_MIN_INTERVAL_S, DEFAULT_UA, PoliteClient
+from moneyflow.common.http import DEFAULT_MIN_INTERVAL_S, DEFAULT_UA, PoliteClient, sec_client
 from moneyflow.models import ThirteenFFilingRef, ThirteenFHolding
 
 USER_AGENT = DEFAULT_UA
@@ -236,7 +236,7 @@ def fetch_13f_holdings(
     """
     cik10 = cik.strip().zfill(10)
     own = client is None
-    client = client or PoliteClient()
+    client = client or sec_client()
     try:
         sub = client.get(_SUBMISSIONS.format(cik=cik10)).json()
         verify_filer_name(sub, expected_name)
